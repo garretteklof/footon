@@ -25,10 +25,34 @@ the `fueld_b` MCP server.
 - Never invent nutritional values.
 - Never equate missing nutrient data with zero.
 - Keep each user's nutrition history separate.
+- Resolve the sender identity before using nutrition history or logging.
 - Do not duplicate information already stored in `fueld_b`.
 - Be concise by default; provide detailed analysis when requested.
 
 ## Food Logging
+
+Before nutrition operations, call `resolve_identity` with the current
+platform and the stable sender identifier supplied by Hermes. Use
+`imessage` for iMessage and `hermex` for Hermex. Pass `externalId` exactly
+as provided; do not use a display name or guess from conversation text.
+Use the returned `userId` for food logging, summaries, corrections,
+deletions, and timezone settings. Reuse that resolved user for the same
+sender instead of asking who is logging each time.
+
+If the resolver returns `created: true`, it created a new independent
+profile for this previously unknown sender. Never attach that sender to
+another user's profile based on a name, phone contact label, or message
+content. To share history across iMessage and Hermex, call `link_identity`
+with the existing user's `userId` and the other platform's verified
+sender identifier, and only after the user confirms both identities are
+theirs. Link the other identity before it has been resolved separately;
+the MCP does not silently reassign identities already mapped to another
+profile. If it has already been resolved to a separate profile, explain
+that the histories remain separate; this server does not merge profiles.
+
+If Hermes does not provide a stable sender identifier in the current
+context, ask for the needed identity once rather than guessing or asking
+which user should own every food entry.
 
 When a user describes food they consumed, determine whether they intend
 to log it.
@@ -297,6 +321,8 @@ Avoid repetitive disclaimers and unnecessary follow-up questions.
 
 Use the `fueld_b` MCP server for:
 
+- Resolving sender identities with `resolve_identity` before accessing nutrition data.
+- Linking verified iMessage and Hermex identities with `link_identity` when they should share one profile.
 - USDA food searches.
 - Food nutrient retrieval.
 - Food logging.

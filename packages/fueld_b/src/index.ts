@@ -20,15 +20,15 @@ const errorResult = (error: unknown) => ({
 });
 
 server.registerTool("resolve_identity", {
-  description: "Find or create a nutrition user for a messaging identity. Repeated calls for the same provider and external ID return the same user.",
-  inputSchema: z.object({ provider: z.string().min(1).max(80), externalId: z.string().min(1).max(255) }),
-}, async ({ provider, externalId }) => textResult(service.resolveIdentity(provider, externalId)));
+  description: "Resolve a stable sender identity to a nutrition user. A new platform/externalId pair creates a separate user and returns created: true; repeated calls return that same user.",
+  inputSchema: z.object({ platform: z.string().min(1).max(80), externalId: z.string().min(1).max(255) }),
+}, async ({ platform, externalId }) => textResult(service.resolveIdentity(platform, externalId)));
 
 server.registerTool("link_identity", {
-  description: "Link another messaging identity to an existing user. Only use after verifying both identities belong to the same person.",
-  inputSchema: z.object({ userId: z.string().uuid(), provider: z.string().min(1).max(80), externalId: z.string().min(1).max(255) }),
-}, async ({ userId, provider, externalId }) => {
-  try { service.linkIdentity(userId, provider, externalId); return textResult({ linked: true, userId, provider, externalId }); }
+  description: "Link an additional platform sender identity to an existing user's nutrition history. Only use after verifying both identities belong to the same person.",
+  inputSchema: z.object({ userId: z.string().uuid(), platform: z.string().min(1).max(80), externalId: z.string().min(1).max(255) }),
+}, async ({ userId, platform, externalId }) => {
+  try { service.linkIdentity(userId, platform, externalId); return textResult({ linked: true, userId, platform, externalId }); }
   catch (error) { return errorResult(error); }
 });
 

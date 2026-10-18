@@ -5,7 +5,9 @@ import { NutritionService } from "../src/services/nutrition";
 import type { FoodDataCentralClient } from "../src/services/food-data-central";
 import { utcRangeForLocalDay } from "../src/time";
 import { Database } from "bun:sqlite";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 const nutrients = { caloriesKcal: 100, proteinG: 5, carbohydratesG: 20, fatG: 2, fiberG: 3, sodiumMg: 10 };
 
@@ -13,14 +15,16 @@ describe("nutrition persistence", () => {
   test("migrates schema and supports many identities for one user", () => {
     const db = openDatabase(":memory:");
     const repo = new NutritionRepository(db);
-    const first = repo.resolveIdentity("telegram", "abc");
-    const second = repo.resolveIdentity("discord", "xyz");
-    repo.linkIdentity(first.userId, "signal", "def");
-    expect(repo.resolveIdentity("telegram", "abc").userId).toBe(first.userId);
-    expect(repo.resolveIdentity("signal", "def").userId).toBe(first.userId);
+    const first = repo.resolveIdentity("imessage", "abc");
+    const second = repo.resolveIdentity("hermex", "xyz");
+    repo.linkIdentity(first.userId, "hermex", "shared-hermex-sender");
+    expect(first.status).toBe("created");
+    expect(repo.resolveIdentity("imessage", "abc").status).toBe("existing");
+    expect(repo.resolveIdentity("imessage", "abc").userId).toBe(first.userId);
+    expect(repo.resolveIdentity("hermex", "shared-hermex-sender").userId).toBe(first.userId);
     expect(second.userId).not.toBe(first.userId);
-    expect(() => repo.linkIdentity(first.userId, "signal", "def")).not.toThrow();
-    expect(() => repo.linkIdentity(second.userId, "telegram", "abc")).toThrow("already linked");
+    expect(() => repo.linkIdentity(first.userId, "hermex", "shared-hermex-sender")).not.toThrow();
+    expect(() => repo.linkIdentity(second.userId, "imessage", "abc")).toThrow("already linked");
     db.close();
   });
 
@@ -30,11 +34,40 @@ describe("nutrition persistence", () => {
     db.exec(readFileSync(new URL("../src/db/migrations/001_initial.sql", import.meta.url), "utf8"));
     db.query("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run("001_initial.sql", "2026-01-01T00:00:00.000Z");
     db.query("INSERT INTO users (id, created_at) VALUES (?, ?)").run("existing-user", "2026-01-01T00:00:00.000Z");
+    db.query("INSERT INTO messaging_identities (provider, external_id, user_id, created_at) VALUES (?, ?, ?, ?)")
+      .run("imessage", "existing-sender", "existing-user", "2026-01-01T00:00:00.000Z");
+    db.query(`INSERT INTO food_logs (
+      id, user_id, fdc_id, food_name, quantity_g, consumed_at,
+      calories_kcal, protein_g, carbohydrates_g, fat_g, fiber_g, sodium_mg,
+      nutrients_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run("existing-entry", "existing-user", 9, "Preserved meal", 100, "2026-01-01T12:00:00.000Z", 100, 5, 20, 2, 3, 10, JSON.stringify(nutrients), "2026-01-01T12:00:00.000Z");
 
     migrate(db);
     expect(db.query<{ timezone: string }, [string]>("SELECT timezone FROM users WHERE id = ?").get("existing-user")?.timezone).toBe("UTC");
-    expect(db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM schema_migrations").get()?.count).toBe(2);
+    expect(db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM schema_migrations").get()?.count).toBe(3);
+    const repo = new NutritionRepository(db);
+    expect(repo.resolveIdentity("imessage", "existing-sender")).toMatchObject({ userId: "existing-user", created: false, status: "existing" });
+    expect(db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM food_logs WHERE id = 'existing-entry'").get()?.count).toBe(1);
+    expect(db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'messaging_identities'").get()).toBeNull();
     db.close();
+  });
+
+  test("persists identity resolution across database restarts", () => {
+    const directory = mkdtempSync(join(tmpdir(), "fueld-b-identities-"));
+    const databasePath = join(directory, "nutrition.sqlite");
+    try {
+      let db = openDatabase(databasePath);
+      const first = new NutritionRepository(db).resolveIdentity("imessage", "persistent-sender");
+      db.close();
+
+      db = openDatabase(databasePath);
+      const resolved = new NutritionRepository(db).resolveIdentity("imessage", "persistent-sender");
+      expect(resolved).toMatchObject({ userId: first.userId, created: false, status: "existing" });
+      db.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   test("scales nutrients by grams and isolates summaries per user and UTC day", () => {
@@ -98,6 +131,28 @@ describe("nutrition persistence", () => {
     expect(service.dailySummary(second.userId, "2026-03-08").totals.entry_count).toBe(1);
     expect(service.dailySummary(second.userId, "2026-03-07").totals.entry_count).toBe(0);
 
+    db.close();
+  });
+
+  test("shares one history across linked iMessage and Hermex identities, while isolating other users", async () => {
+    const db = openDatabase(":memory:");
+    const repo = new NutritionRepository(db);
+    const imessage = repo.resolveIdentity("imessage", "imessage-sender-1");
+    repo.linkIdentity(imessage.userId, "hermex", "hermex-sender-1");
+    const hermex = repo.resolveIdentity("hermex", "hermex-sender-1");
+    const otherUser = repo.resolveIdentity("imessage", "imessage-sender-2");
+    const fakeFoods = {
+      getFoodNutrients: async () => ({ food: { fdcId: 9, description: "Example", dataType: "Foundation", brandOwner: null }, nutrientsPer100g: nutrients, source: "test" }),
+      searchFoods: async () => [],
+    } as unknown as FoodDataCentralClient;
+    const service = new NutritionService(repo, fakeFoods);
+
+    await service.logFood({ userId: imessage.userId, fdcId: 9, quantityG: 100, consumedAt: "2026-04-10T08:00:00Z" });
+    await service.logFood({ userId: hermex.userId, fdcId: 9, quantityG: 50, consumedAt: "2026-04-10T12:00:00Z" });
+    expect(hermex.userId).toBe(imessage.userId);
+    expect(service.dailySummary(hermex.userId, "2026-04-10").totals.entry_count).toBe(2);
+    expect(service.dailySummary(otherUser.userId, "2026-04-10").totals.entry_count).toBe(0);
+    expect(service.dailySummary(hermex.userId, "2026-04-10").totals.calories_kcal).toBe(150);
     db.close();
   });
 

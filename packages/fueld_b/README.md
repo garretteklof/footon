@@ -41,8 +41,8 @@ The database enables foreign keys, a busy timeout, and WAL mode. File-backed dat
 
 ## MCP tools
 
-- `resolve_identity(provider, externalId)`: Find or create the user associated with a messaging identity.
-- `link_identity(userId, provider, externalId)`: Link another identity to a user. The MCP host must verify control of both identities; this local server does not implement authentication.
+- `resolve_identity(platform, externalId)`: Resolve a stable sender ID to its nutrition user. A new platform/sender pair creates a separate user and returns `created: true`; repeated calls return the same user. Use `imessage` or `hermex` for these interfaces and pass their stable sender identifier, not a display name.
+- `link_identity(userId, platform, externalId)`: Link an additional identity to a user so both platforms share the same history. Verify that both identities belong to the same person first; this local server does not implement authentication. Link an identity before it is first resolved. If it already belongs to another profile, the tool returns an error and does not merge or move nutrition history.
 - `set_user_timezone(userId, timezone)`: Set a user's IANA timezone, such as `America/Chicago`.
 - `search_foods(query, pageSize?)`: Search USDA FoodData Central.
 - `get_food_nutrients(fdcId)`: Retrieve selected nutrient values per 100 g.
@@ -52,6 +52,8 @@ The database enables foreign keys, a busy timeout, and WAL mode. File-backed dat
 - `daily_nutrition_summary(userId, date)`: Summarize entries for `YYYY-MM-DD` in that user's timezone, including DST-aware day boundaries.
 
 Each messaging identity is unique and maps to one user; a user can have multiple identities. Food history and timezone preferences are scoped to the user. FoodData Central values vary by source and can be approximate; this tool is intended for tracking, not medical advice.
+
+Identity mappings are stored in SQLite and survive restarts. Migration `003_identities.sql` copies mappings from the previous `messaging_identities` schema into `identities` without changing users or food logs. Unknown senders receive a new independent user rather than being attached to an existing profile; the resolver reports that creation explicitly.
 
 ## Development
 

@@ -107,42 +107,42 @@ export class NutritionRepository {
     if (result.changes === 0) throw new Error("User not found; resolve a messaging identity first");
   }
 
-  resolveIdentity(provider: string, externalId: string): { userId: string; created: boolean } {
+  resolveIdentity(platform: string, externalId: string): { userId: string; created: boolean; status: "created" | "existing" } {
     const existing = this.db.query<{ user_id: string }, [string, string]>(
-      "SELECT user_id FROM messaging_identities WHERE provider = ? AND external_id = ?",
-    ).get(provider, externalId);
-    if (existing) return { userId: existing.user_id, created: false };
+      "SELECT user_id FROM identities WHERE platform = ? AND external_id = ?",
+    ).get(platform, externalId);
+    if (existing) return { userId: existing.user_id, created: false, status: "existing" };
 
     const userId = randomUUID();
     const now = new Date().toISOString();
     const create = this.db.transaction(() => {
       this.db.query("INSERT INTO users (id, created_at) VALUES (?, ?)").run(userId, now);
-      this.db.query("INSERT INTO messaging_identities (provider, external_id, user_id, created_at) VALUES (?, ?, ?, ?)")
-        .run(provider, externalId, userId, now);
+      this.db.query("INSERT INTO identities (user_id, platform, external_id, created_at) VALUES (?, ?, ?, ?)")
+        .run(userId, platform, externalId, now);
     });
     try {
       create();
-      return { userId, created: true };
+      return { userId, created: true, status: "created" };
     } catch (error) {
       const raced = this.db.query<{ user_id: string }, [string, string]>(
-        "SELECT user_id FROM messaging_identities WHERE provider = ? AND external_id = ?",
-      ).get(provider, externalId);
-      if (raced) return { userId: raced.user_id, created: false };
+        "SELECT user_id FROM identities WHERE platform = ? AND external_id = ?",
+      ).get(platform, externalId);
+      if (raced) return { userId: raced.user_id, created: false, status: "existing" };
       throw error;
     }
   }
 
-  linkIdentity(userId: string, provider: string, externalId: string): void {
+  linkIdentity(userId: string, platform: string, externalId: string): void {
     if (!this.db.query("SELECT 1 FROM users WHERE id = ?").get(userId)) throw new Error("User not found");
     const existing = this.db.query<{ user_id: string }, [string, string]>(
-      "SELECT user_id FROM messaging_identities WHERE provider = ? AND external_id = ?",
-    ).get(provider, externalId);
+      "SELECT user_id FROM identities WHERE platform = ? AND external_id = ?",
+    ).get(platform, externalId);
     if (existing) {
       if (existing.user_id !== userId) throw new Error("That messaging identity is already linked to another user");
       return;
     }
-    this.db.query("INSERT INTO messaging_identities (provider, external_id, user_id, created_at) VALUES (?, ?, ?, ?)")
-      .run(provider, externalId, userId, new Date().toISOString());
+    this.db.query("INSERT INTO identities (user_id, platform, external_id, created_at) VALUES (?, ?, ?, ?)")
+      .run(userId, platform, externalId, new Date().toISOString());
   }
 
   logFood(input: FoodLogInput): string {

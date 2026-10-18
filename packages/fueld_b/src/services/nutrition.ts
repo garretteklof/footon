@@ -5,12 +5,12 @@ import { isValidTimeZone, utcRangeForLocalDay } from "../time";
 export class NutritionService {
   constructor(private readonly repository: NutritionRepository, private readonly foods: FoodDataCentralClient) {}
 
-  resolveIdentity(provider: string, externalId: string) {
-    return this.repository.resolveIdentity(provider, externalId);
+  resolveIdentity(platform: string, externalId: string) {
+    return this.repository.resolveIdentity(platform, externalId);
   }
 
-  linkIdentity(userId: string, provider: string, externalId: string) {
-    return this.repository.linkIdentity(userId, provider, externalId);
+  linkIdentity(userId: string, platform: string, externalId: string) {
+    return this.repository.linkIdentity(userId, platform, externalId);
   }
 
   async updateEntry(input: {
