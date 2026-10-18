@@ -9,7 +9,7 @@ export interface Config {
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const configuredDatabasePath = env.FUEL_DB_PATH;
+  const configuredDatabasePath = env.FUELD_B_PATH;
   return {
     databasePath: configuredDatabasePath
       ? isAbsolute(configuredDatabasePath) ? configuredDatabasePath : resolve(projectRoot, configuredDatabasePath)

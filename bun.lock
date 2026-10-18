@@ -3,10 +3,10 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "fuel-db",
+      "name": "fueld_b",
     },
-    "apps/fuel-db": {
-      "name": "fuel-db",
+    "apps/fueld_b": {
+      "name": "fueld_b",
       "version": "0.1.0",
       "dependencies": {
         "@modelcontextprotocol/server": "^2.0.0",
@@ -30,7 +30,7 @@
 
     "bun-types": ["bun-types@1.4.3", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-tinRJNGOmUN+tEAsn2y2e942n9JHRHR42iUYzDH75NmhJqVBokGSQkkfSFdNWwsANIdrK6ACH9t01M452YyTwg=="],
 
-    "fuel-db": ["fuel-db@workspace:apps/fuel-db"],
+    "fueld_b": ["fueld_b@workspace:apps/fueld_b"],
 
     "typescript": ["typescript@6.0.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw=="],
 

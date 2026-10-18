@@ -1,4 +1,4 @@
-# fuel-db
+# fueld_b
 
 A nutrition tracking MCP server built with TypeScript, Bun, SQLite, and USDA FoodData Central. It uses the official MCP TypeScript server SDK over stdio and can run as its own package or through the Hermarium workspace.
 
@@ -13,15 +13,15 @@ From the Hermarium root:
 
 ```sh
 bun install
-cp apps/fuel-db/.env.example apps/fuel-db/.env
-# Set FDC_API_KEY in apps/fuel-db/.env for local development.
-bun run start:fuel-db
+cp apps/fueld_b/.env.example apps/fueld_b/.env
+# Set FDC_API_KEY in apps/fueld_b/.env for local development.
+bun run start:fueld_b
 ```
 
 To run directly from this package directory:
 
 ```sh
-cd apps/fuel-db
+cd apps/fueld_b
 bun install
 cp .env.example .env
 # Set FDC_API_KEY in .env.
@@ -33,8 +33,8 @@ Bun loads `.env` files for local development. MCP hosts should provide `FDC_API_
 ## Configuration and data
 
 - `FDC_API_KEY` is required. Obtain a key from [USDA FoodData Central](https://fdc.nal.usda.gov/api-guide/). Keep it in a local `.env` file or secret environment variable; never commit it.
-- `FUEL_DB_PATH` optionally overrides the database file. Absolute paths are used as-is; relative paths resolve from this package root.
-- The default database is `apps/fuel-db/data/nutrition.sqlite`, resolved from the source package location rather than the process working directory. Its parent directory is created automatically.
+- `FUELD_B_PATH` optionally overrides the database file. Absolute paths are used as-is; relative paths resolve from this package root.
+- The default database is `apps/fueld_b/data/nutrition.sqlite`, resolved from the source package location rather than the process working directory. Its parent directory is created automatically.
 - SQLite data, WAL/SHM files, `.env` files, and dependencies are Git-ignored.
 
 The database enables foreign keys, a busy timeout, and WAL mode. File-backed databases are created with owner-only permissions. Versioned migrations live in `src/db/migrations/` and run transactionally at startup.

@@ -14,13 +14,13 @@ describe("database path configuration", () => {
   });
 
   test("resolves relative overrides from the project root and preserves absolute overrides", () => {
-    expect(loadConfig({ FUEL_DB_PATH: "custom/nutrition.sqlite" }).databasePath)
+    expect(loadConfig({ FUELD_B_PATH: "custom/nutrition.sqlite" }).databasePath)
       .toBe(join(projectRoot, "custom", "nutrition.sqlite"));
-    expect(loadConfig({ FUEL_DB_PATH: "/tmp/custom.sqlite" }).databasePath).toBe("/tmp/custom.sqlite");
+    expect(loadConfig({ FUELD_B_PATH: "/tmp/custom.sqlite" }).databasePath).toBe("/tmp/custom.sqlite");
   });
 
   test("creates the parent directory for a new SQLite database", () => {
-    const directory = mkdtempSync(join(tmpdir(), "fuel-db-test-"));
+    const directory = mkdtempSync(join(tmpdir(), "fueld_b-test-"));
     const databasePath = join(directory, "data", "nutrition.sqlite");
     const db = openDatabase(databasePath);
     db.close();

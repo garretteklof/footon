@@ -6,8 +6,8 @@
     "apps/*"
   ],
   "scripts": {
-    "start:fuel-db": "cd apps/fuel-db && bun src/index.ts",
-    "dev:fuel-db": "cd apps/fuel-db && bun --watch src/index.ts",
+    "start:fueld_b": "cd apps/fueld_b && bun src/index.ts",
+    "dev:fueld_b": "cd apps/fueld_b && bun --watch src/index.ts",
     "test": "bun run --filter '*' test",
     "typecheck": "bun run --filter '*' typecheck"
   }

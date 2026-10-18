@@ -12,7 +12,7 @@ if (!config.fdcApiKey) throw new Error("FDC_API_KEY is required. See .env.exampl
 const db = openDatabase(config.databasePath);
 const service = new NutritionService(new NutritionRepository(db), new FoodDataCentralClient(config.fdcApiKey));
 
-const server = new McpServer({ name: "fuel-db", version: "0.1.0" });
+const server = new McpServer({ name: "fueld_b", version: "0.1.0" });
 const textResult = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] });
 const errorResult = (error: unknown) => ({
   content: [{ type: "text" as const, text: error instanceof Error ? error.message : "Unexpected error" }],
@@ -73,4 +73,4 @@ server.registerTool("daily_nutrition_summary", {
 const handle = serveStdio(() => server);
 process.on("SIGINT", () => { void handle.close(); db.close(); });
 process.on("SIGTERM", () => { void handle.close(); db.close(); });
-console.error(`fuel-db MCP server running over stdio; SQLite: ${config.databasePath}`);
+console.error(`fueld_b MCP server running over stdio; SQLite: ${config.databasePath}`);

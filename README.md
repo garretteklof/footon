@@ -17,7 +17,7 @@ Components remain loosely coupled. TypeScript projects can use the Bun workspace
 ```text
 hermarium/
 ├── apps/
-│   └── fuel-db/       # Nutrition tracking MCP server
+│   └── fueld_b/       # Nutrition tracking MCP server
 │       ├── src/
 │       │   └── db/migrations/
 │       ├── tests/
@@ -34,19 +34,19 @@ Future skills can live under `skills/`; shared TypeScript libraries under `packa
 
 ## Install and use a component
 
-Each component documents its own requirements and setup. For `fuel-db`, you can install and run it from its package directory:
+Each component documents its own requirements and setup. For `fueld_b`, you can install and run it from its package directory:
 
 ```sh
-cd apps/fuel-db
+cd apps/fueld_b
 bun install
 cp .env.example .env
 # Set FDC_API_KEY in .env
 bun run start
 ```
 
-The server speaks MCP over stdio. Point an MCP host at the `apps/fuel-db` package and provide `FDC_API_KEY` through its environment. If an existing Hermes MCP entry points to the old `fuel-db` directory, update its working directory to `hermarium/apps/fuel-db` (or update its command to the new package path). This repository restructuring does not change any server registrations.
+The server speaks MCP over stdio. Point an MCP host at the `apps/fueld_b` package and provide `FDC_API_KEY` through its environment. If an existing Hermes MCP entry points to the app's previous location, update its working directory to `hermarium/apps/fueld_b` (or update its command to the new package path). This repository restructuring does not change any server registrations.
 
-See [`apps/fuel-db/README.md`](apps/fuel-db/README.md) for the server's tools, database location, configuration, and host setup.
+See [`apps/fueld_b/README.md`](apps/fueld_b/README.md) for the server's tools, database location, configuration, and host setup.
 
 ## Monorepo development
 
@@ -56,7 +56,7 @@ From the repository root:
 bun install
 bun run test
 bun run typecheck
-bun run start:fuel-db
+bun run start:fueld_b
 ```
 
 The workspace coordinates TypeScript packages without imposing a shared runtime or dependency model on future non-TypeScript components. Local `.env` files, SQLite data, and dependency directories are excluded from Git.
