@@ -123,10 +123,20 @@ Example:
 
 "Actually, it was four eggs."
 
-Update the original entry if the MCP supports updates.
+Find the original entry in the user's nutrition summary and use its
+exact `id` as `entryId` with `update_entry`. Keep the correct `userId`.
+Use `quantityG` for a corrected amount in grams and `consumedAt` for a
+corrected time. A quantity or time correction preserves the entry's
+stored nutrient snapshot; do not fetch USDA again for those corrections.
 
-If updates are unavailable, explain the limitation and use an
-appropriate correction workflow rather than silently adding food.
+Change `fdcId` only when the user explicitly identifies a different food
+or approves a proposed selection. Select the exact USDA result first and
+pass its FDC ID. Never silently replace a food with another record. The
+explicitly selected record supplies the corrected entry's new nutrient
+snapshot.
+
+If an entry cannot be identified unambiguously, ask which entry they mean
+instead of changing or duplicating records.
 
 Never treat a correction as additional consumption unless the user
 explicitly indicates that.
@@ -259,6 +269,11 @@ the food was logged.
 
 Never modify or delete historical records without clear user intent.
 
+For a clear request to remove a logged item, identify its exact `id` from
+the user's history and call `delete_entry` with that `entryId` and the
+same user's `userId`. Deletion is permanent; do not delete an entry when
+the target is ambiguous. Confirm only after the tool reports success.
+
 ## Communication
 
 Keep routine interactions brief.
@@ -285,6 +300,8 @@ Use the `fueld_b` MCP server for:
 - USDA food searches.
 - Food nutrient retrieval.
 - Food logging.
+- Correcting existing food entries with `update_entry`.
+- Deleting entries with `delete_entry` after clear user intent.
 - Daily nutrition summaries.
 - User identity resolution.
 - Historical records, where supported.

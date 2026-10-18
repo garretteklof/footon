@@ -109,4 +109,132 @@ describe("nutrition persistence", () => {
       start: "2026-11-01T07:00:00.000Z", end: "2026-11-02T08:00:00.000Z",
     });
   });
+
+  test("updates quantity and consumption time from the stored nutrient snapshot", async () => {
+    const db = openDatabase(":memory:");
+    const repo = new NutritionRepository(db);
+    const { userId } = repo.resolveIdentity("test", "update-owner");
+    const entryId = repo.logFood({
+      userId, fdcId: 9, foodName: "Original food", quantityG: 50,
+      consumedAt: "2026-01-02T12:00:00.000Z", nutrientsPer100g: nutrients,
+    });
+    let lookups = 0;
+    const foods = {
+      getFoodNutrients: async () => {
+        lookups++;
+        return { food: { fdcId: 9, description: "USDA value changed", dataType: "Foundation", brandOwner: null }, nutrientsPer100g: { ...nutrients, caloriesKcal: 999 }, source: "test" };
+      },
+      searchFoods: async () => [],
+    } as unknown as FoodDataCentralClient;
+    const service = new NutritionService(repo, foods);
+
+    const updated = await service.updateEntry({ userId, entryId, quantityG: 125, consumedAt: "2026-01-02T13:30:00-05:00" });
+    expect(updated.success).toBe(true);
+    if (!updated.success) throw new Error(updated.error.message);
+    expect(updated.entry).toMatchObject({
+      id: entryId, fdcId: 9, foodName: "Original food", quantityG: 125,
+      consumedAt: "2026-01-02T18:30:00.000Z",
+      nutrients: { caloriesKcal: 125, proteinG: 6.25 },
+      nutrientsPer100g: { caloriesKcal: 100, proteinG: 5 },
+    });
+    expect(lookups).toBe(0);
+    db.close();
+  });
+
+  test("changes food only for an explicit FDC selection and stores its nutrient snapshot", async () => {
+    const db = openDatabase(":memory:");
+    const repo = new NutritionRepository(db);
+    const { userId } = repo.resolveIdentity("test", "food-correction-owner");
+    const entryId = repo.logFood({
+      userId, fdcId: 9, foodName: "Original food", quantityG: 50,
+      consumedAt: "2026-01-02T12:00:00.000Z", nutrientsPer100g: nutrients,
+    });
+    const selectedNutrients = { ...nutrients, caloriesKcal: 240, proteinG: 12 };
+    let selectedId = 0;
+    const foods = {
+      getFoodNutrients: async (fdcId: number) => {
+        selectedId = fdcId;
+        return { food: { fdcId, description: "Explicitly selected food", dataType: "Foundation", brandOwner: null }, nutrientsPer100g: selectedNutrients, source: "test" };
+      },
+      searchFoods: async () => [],
+    } as unknown as FoodDataCentralClient;
+    const service = new NutritionService(repo, foods);
+
+    const updated = await service.updateEntry({ userId, entryId, fdcId: 10 });
+    expect(updated.success).toBe(true);
+    if (!updated.success) throw new Error(updated.error.message);
+    expect(selectedId).toBe(10);
+    expect(updated.entry).toMatchObject({
+      fdcId: 10, foodName: "Explicitly selected food", quantityG: 50,
+      nutrients: { caloriesKcal: 120, proteinG: 6 },
+      nutrientsPer100g: { caloriesKcal: 240, proteinG: 12 },
+    });
+    db.close();
+  });
+
+  test("deletes an owned entry and returns the deleted record", () => {
+    const db = openDatabase(":memory:");
+    const repo = new NutritionRepository(db);
+    const { userId } = repo.resolveIdentity("test", "delete-owner");
+    const entryId = repo.logFood({
+      userId, fdcId: 9, foodName: "Food to delete", quantityG: 75,
+      consumedAt: "2026-01-02T12:00:00.000Z", nutrientsPer100g: nutrients,
+    });
+    const service = new NutritionService(repo, {} as FoodDataCentralClient);
+
+    const deleted = service.deleteEntry(userId, entryId);
+    expect(deleted).toMatchObject({ success: true, entry: { id: entryId, userId, foodName: "Food to delete", quantityG: 75 } });
+    expect(repo.getFoodLogForUser(userId, entryId)).toMatchObject({ success: false, error: { code: "not_found" } });
+    db.close();
+  });
+
+  test("reports missing entries and prevents cross-user updates or deletion", async () => {
+    const db = openDatabase(":memory:");
+    const repo = new NutritionRepository(db);
+    const owner = repo.resolveIdentity("test", "entry-owner");
+    const other = repo.resolveIdentity("test", "entry-other");
+    const entryId = repo.logFood({
+      userId: owner.userId, fdcId: 9, foodName: "Private food", quantityG: 60,
+      consumedAt: "2026-01-02T12:00:00.000Z", nutrientsPer100g: nutrients,
+    });
+    const service = new NutritionService(repo, {} as FoodDataCentralClient);
+
+    expect(await service.updateEntry({ userId: other.userId, entryId, quantityG: 200 }))
+      .toMatchObject({ success: false, error: { code: "forbidden" } });
+    expect(service.deleteEntry(other.userId, entryId))
+      .toMatchObject({ success: false, error: { code: "forbidden" } });
+    expect(repo.getFoodLogForUser(owner.userId, entryId)).toMatchObject({
+      success: true, entry: { userId: owner.userId, foodName: "Private food", quantityG: 60 },
+    });
+    expect(await service.updateEntry({ userId: owner.userId, entryId: "missing-entry", quantityG: 20 }))
+      .toMatchObject({ success: false, error: { code: "not_found" } });
+    expect(service.deleteEntry(owner.userId, "missing-entry"))
+      .toMatchObject({ success: false, error: { code: "not_found" } });
+    db.close();
+  });
+
+  test("rejects empty and invalid entry corrections without changing the entry", async () => {
+    const db = openDatabase(":memory:");
+    const repo = new NutritionRepository(db);
+    const { userId } = repo.resolveIdentity("test", "invalid-update-owner");
+    const entryId = repo.logFood({
+      userId, fdcId: 9, foodName: "Stable food", quantityG: 60,
+      consumedAt: "2026-01-02T12:00:00.000Z", nutrientsPer100g: nutrients,
+    });
+    const service = new NutritionService(repo, {} as FoodDataCentralClient);
+
+    for (const input of [
+      { userId, entryId },
+      { userId, entryId, quantityG: 0 },
+      { userId, entryId, quantityG: Number.NaN },
+      { userId, entryId, fdcId: -1 },
+      { userId, entryId, consumedAt: "not-a-date" },
+    ]) {
+      expect(await service.updateEntry(input)).toMatchObject({ success: false, error: { code: "invalid_input" } });
+    }
+    expect(repo.getFoodLogForUser(userId, entryId)).toMatchObject({
+      success: true, entry: { foodName: "Stable food", quantityG: 60, consumedAt: "2026-01-02T12:00:00.000Z" },
+    });
+    db.close();
+  });
 });

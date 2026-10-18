@@ -20,6 +20,71 @@ export interface FoodLogInput {
   nutrientsPer100g: Nutrients;
 }
 
+export interface FoodLogEntry {
+  id: string;
+  userId: string;
+  fdcId: number;
+  foodName: string;
+  quantityG: number;
+  consumedAt: string;
+  nutrients: Nutrients;
+  nutrientsPer100g: Nutrients;
+}
+
+export type EntryMutationResult =
+  | { success: true; entry: FoodLogEntry }
+  | { success: false; error: { code: "not_found" | "forbidden" | "invalid_input" | "food_lookup_failed"; message: string } };
+
+export interface FoodLogChanges {
+  fdcId?: number;
+  foodName?: string;
+  quantityG?: number;
+  consumedAt?: string;
+  nutrientsPer100g?: Nutrients;
+}
+
+interface FoodLogRow {
+  id: string;
+  user_id: string;
+  fdc_id: number;
+  food_name: string;
+  quantity_g: number;
+  consumed_at: string;
+  calories_kcal: number | null;
+  protein_g: number | null;
+  carbohydrates_g: number | null;
+  fat_g: number | null;
+  fiber_g: number | null;
+  sodium_mg: number | null;
+  nutrients_json: string;
+}
+
+const toFoodLogEntry = (row: FoodLogRow): FoodLogEntry => ({
+  id: row.id,
+  userId: row.user_id,
+  fdcId: row.fdc_id,
+  foodName: row.food_name,
+  quantityG: row.quantity_g,
+  consumedAt: row.consumed_at,
+  nutrients: {
+    caloriesKcal: row.calories_kcal,
+    proteinG: row.protein_g,
+    carbohydratesG: row.carbohydrates_g,
+    fatG: row.fat_g,
+    fiberG: row.fiber_g,
+    sodiumMg: row.sodium_mg,
+  },
+  nutrientsPer100g: JSON.parse(row.nutrients_json) as Nutrients,
+});
+
+const scaleNutrients = (nutrientsPer100g: Nutrients, quantityG: number): Nutrients =>
+  Object.fromEntries(Object.entries(nutrientsPer100g).map(([key, value]) => [
+    key, value === null ? null : value * quantityG / 100,
+  ])) as Nutrients;
+
+const foodLogColumns = `id, user_id, fdc_id, food_name, quantity_g, consumed_at,
+  calories_kcal, protein_g, carbohydrates_g, fat_g, fiber_g, sodium_mg, nutrients_json`;
+
 export class NutritionRepository {
   constructor(private readonly db: Database) {}
 
@@ -96,6 +161,57 @@ export class NutritionRepository {
         scaled(input.nutrientsPer100g.fiberG), scaled(input.nutrientsPer100g.sodiumMg),
         JSON.stringify(input.nutrientsPer100g), new Date().toISOString());
     return id;
+  }
+
+  getFoodLogForUser(userId: string, entryId: string): EntryMutationResult {
+    const row = this.db.query<FoodLogRow, [string]>(`SELECT ${foodLogColumns} FROM food_logs WHERE id = ?`).get(entryId);
+    if (!row) return { success: false, error: { code: "not_found", message: "Food log entry not found" } };
+    if (row.user_id !== userId) return { success: false, error: { code: "forbidden", message: "Food log entry belongs to another user" } };
+    return { success: true, entry: toFoodLogEntry(row) };
+  }
+
+  updateFoodLog(userId: string, entryId: string, changes: FoodLogChanges): EntryMutationResult {
+    const update = this.db.transaction((): EntryMutationResult => {
+      const row = this.db.query<FoodLogRow, [string]>(`SELECT ${foodLogColumns} FROM food_logs WHERE id = ?`).get(entryId);
+      if (!row) return { success: false, error: { code: "not_found", message: "Food log entry not found" } };
+      if (row.user_id !== userId) return { success: false, error: { code: "forbidden", message: "Food log entry belongs to another user" } };
+
+      const quantityG = changes.quantityG ?? row.quantity_g;
+      const nutrientsPer100g = changes.nutrientsPer100g ?? JSON.parse(row.nutrients_json) as Nutrients;
+      const nutrients = scaleNutrients(nutrientsPer100g, quantityG);
+      this.db.query(`UPDATE food_logs SET fdc_id = ?, food_name = ?, quantity_g = ?, consumed_at = ?,
+        calories_kcal = ?, protein_g = ?, carbohydrates_g = ?, fat_g = ?, fiber_g = ?, sodium_mg = ?, nutrients_json = ?
+        WHERE id = ? AND user_id = ?`).run(
+        changes.fdcId ?? row.fdc_id,
+        changes.foodName ?? row.food_name,
+        quantityG,
+        changes.consumedAt ?? row.consumed_at,
+        nutrients.caloriesKcal,
+        nutrients.proteinG,
+        nutrients.carbohydratesG,
+        nutrients.fatG,
+        nutrients.fiberG,
+        nutrients.sodiumMg,
+        JSON.stringify(nutrientsPer100g),
+        entryId,
+        userId,
+      );
+      const updated = this.db.query<FoodLogRow, [string, string]>(`SELECT ${foodLogColumns} FROM food_logs WHERE id = ? AND user_id = ?`).get(entryId, userId);
+      if (!updated) return { success: false, error: { code: "not_found", message: "Food log entry not found" } };
+      return { success: true, entry: toFoodLogEntry(updated) };
+    });
+    return update();
+  }
+
+  deleteFoodLog(userId: string, entryId: string): EntryMutationResult {
+    const remove = this.db.transaction((): EntryMutationResult => {
+      const row = this.db.query<FoodLogRow, [string]>(`SELECT ${foodLogColumns} FROM food_logs WHERE id = ?`).get(entryId);
+      if (!row) return { success: false, error: { code: "not_found", message: "Food log entry not found" } };
+      if (row.user_id !== userId) return { success: false, error: { code: "forbidden", message: "Food log entry belongs to another user" } };
+      this.db.query("DELETE FROM food_logs WHERE id = ? AND user_id = ?").run(entryId, userId);
+      return { success: true, entry: toFoodLogEntry(row) };
+    });
+    return remove();
   }
 
   dailySummary(userId: string, date: string, timezone: string, start: string, end: string) {

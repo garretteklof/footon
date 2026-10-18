@@ -63,6 +63,23 @@ server.registerTool("log_food", {
   try { return textResult(await service.logFood({ userId, fdcId, quantityG, consumedAt })); } catch (error) { return errorResult(error); }
 });
 
+server.registerTool("update_entry", {
+  description: "Correct a food log entry owned by a user. Update quantity in grams, explicitly select another USDA FDC food, or correct the consumed time. Quantity-only changes use the entry's stored nutrient snapshot.",
+  inputSchema: z.object({
+    userId: z.string().uuid(), entryId: z.string().uuid(),
+    quantityG: z.number().positive().optional(),
+    fdcId: z.number().int().positive().optional(),
+    consumedAt: z.string().datetime({ offset: true }).optional(),
+  }).refine(input => input.quantityG !== undefined || input.fdcId !== undefined || input.consumedAt !== undefined, {
+    message: "Provide at least one field to update",
+  }),
+}, async input => textResult(await service.updateEntry(input)));
+
+server.registerTool("delete_entry", {
+  description: "Delete a food log entry owned by a user. Returns the deleted entry or a structured missing/unauthorized error.",
+  inputSchema: z.object({ userId: z.string().uuid(), entryId: z.string().uuid() }),
+}, async ({ userId, entryId }) => textResult(service.deleteEntry(userId, entryId)));
+
 server.registerTool("daily_nutrition_summary", {
   description: "Summarize a user's logged nutrition and entries for one calendar day in that user's IANA timezone.",
   inputSchema: z.object({ userId: z.string().uuid(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }),

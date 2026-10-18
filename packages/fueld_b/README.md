@@ -47,6 +47,8 @@ The database enables foreign keys, a busy timeout, and WAL mode. File-backed dat
 - `search_foods(query, pageSize?)`: Search USDA FoodData Central.
 - `get_food_nutrients(fdcId)`: Retrieve selected nutrient values per 100 g.
 - `log_food(userId, fdcId, quantityG, consumedAt?)`: Fetch USDA nutrients, scale them to the entered grams, and save a nutrient snapshot. Timestamps are normalized to UTC.
+- `update_entry(userId, entryId, quantityG?, fdcId?, consumedAt?)`: Correct an existing entry owned by that user. Quantity and consumption-time edits preserve its stored nutrient snapshot; changing `fdcId` requires an explicit selection and stores that selected record's nutrient snapshot. Quantities are grams; `consumedAt` is the only meal-related metadata currently supported by the schema.
+- `delete_entry(userId, entryId)`: Delete an owned entry and return the deleted record. Missing and cross-user IDs return structured errors.
 - `daily_nutrition_summary(userId, date)`: Summarize entries for `YYYY-MM-DD` in that user's timezone, including DST-aware day boundaries.
 
 Each messaging identity is unique and maps to one user; a user can have multiple identities. Food history and timezone preferences are scoped to the user. FoodData Central values vary by source and can be approximate; this tool is intended for tracking, not medical advice.
