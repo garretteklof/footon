@@ -5,7 +5,7 @@
     "": {
       "name": "fueld_b",
     },
-    "apps/fueld_b": {
+    "packages/fueld_b": {
       "name": "fueld_b",
       "version": "0.1.0",
       "dependencies": {
@@ -30,7 +30,7 @@
 
     "bun-types": ["bun-types@1.4.3", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-tinRJNGOmUN+tEAsn2y2e942n9JHRHR42iUYzDH75NmhJqVBokGSQkkfSFdNWwsANIdrK6ACH9t01M452YyTwg=="],
 
-    "fueld_b": ["fueld_b@workspace:apps/fueld_b"],
+    "fueld_b": ["fueld_b@workspace:packages/fueld_b"],
 
     "typescript": ["typescript@6.0.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw=="],
 

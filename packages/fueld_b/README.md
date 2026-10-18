@@ -13,28 +13,28 @@ From the Hermarium root:
 
 ```sh
 bun install
-cp apps/fueld_b/.env.example apps/fueld_b/.env
-# Set FDC_API_KEY in apps/fueld_b/.env for local development.
+cp packages/fueld_b/.env.example packages/fueld_b/.env
+# Set FDC_API_KEY in packages/fueld_b/.env for local development.
 bun run start:fueld_b
 ```
 
 To run directly from this package directory:
 
 ```sh
-cd apps/fueld_b
+cd packages/fueld_b
 bun install
 cp .env.example .env
 # Set FDC_API_KEY in .env.
 bun run start
 ```
 
-Bun loads `.env` files for local development. MCP hosts should provide `FDC_API_KEY` in the server process environment. Configure the host to launch `bun run start` with this package as its working directory, or use the package's absolute path in the command. The server writes protocol messages to stdout and diagnostics to stderr.
+Bun loads `.env` files for local development. MCP hosts should provide `FDC_API_KEY` in the server process environment. Configure the host to launch `bun run start` with this package as its working directory, or use the package's absolute path in the command. The server writes protocol messages to stdout and diagnostics to stderr. Configure the MCP server and install the skill separately; the skill becomes available in new Hermes sessions after it is copied into the active profile's skills directory. See the Hermes [skills guide](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/skills.md) for profile-specific skill paths.
 
 ## Configuration and data
 
 - `FDC_API_KEY` is required. Obtain a key from [USDA FoodData Central](https://fdc.nal.usda.gov/api-guide/). Keep it in a local `.env` file or secret environment variable; never commit it.
 - `FUELD_B_PATH` optionally overrides the database file. Absolute paths are used as-is; relative paths resolve from this package root.
-- The default database is `apps/fueld_b/data/nutrition.sqlite`, resolved from the source package location rather than the process working directory. Its parent directory is created automatically.
+- The default database is `packages/fueld_b/data/nutrition.sqlite`, resolved from the source package location rather than the process working directory. Its parent directory is created automatically.
 - SQLite data, WAL/SHM files, `.env` files, and dependencies are Git-ignored.
 
 The database enables foreign keys, a busy timeout, and WAL mode. File-backed databases are created with owner-only permissions. Versioned migrations live in `src/db/migrations/` and run transactionally at startup.

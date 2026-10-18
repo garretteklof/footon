@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "workspaces": [
-    "apps/*"
+    "packages/*"
   ],
   "scripts": {
-    "start:fueld_b": "cd apps/fueld_b && bun src/index.ts",
-    "dev:fueld_b": "cd apps/fueld_b && bun --watch src/index.ts",
+    "start:fueld_b": "cd packages/fueld_b && bun src/index.ts",
+    "dev:fueld_b": "cd packages/fueld_b && bun --watch src/index.ts",
     "test": "bun run --filter '*' test",
     "typecheck": "bun run --filter '*' typecheck"
   }

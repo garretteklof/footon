@@ -16,11 +16,12 @@ Components remain loosely coupled. TypeScript projects can use the Bun workspace
 
 ```text
 hermarium/
-├── apps/
-│   └── fueld_b/       # Nutrition tracking MCP server
+├── packages/
+│   └── fueld_b/       # Nutrition MCP and Hermes skill
 │       ├── src/
 │       │   └── db/migrations/
 │       ├── tests/
+│       ├── skill/SKILL.md
 │       ├── .env.example
 │       └── README.md
 ├── package.json       # Bun workspace and root development commands
@@ -30,23 +31,23 @@ hermarium/
 └── README.md
 ```
 
-Future skills can live under `skills/`; shared TypeScript libraries under `packages/`; and other extensions under `integrations/`. Those directories are added when they contain a component.
+Capabilities live in `packages/`, with related MCP servers, Hermes skills, and supporting material kept together when they belong to the same capability. Each package remains independently runnable. Non-TypeScript components can keep their native tooling.
 
 ## Install and use a component
 
 Each component documents its own requirements and setup. For `fueld_b`, you can install and run it from its package directory:
 
 ```sh
-cd apps/fueld_b
+cd packages/fueld_b
 bun install
 cp .env.example .env
 # Set FDC_API_KEY in .env
 bun run start
 ```
 
-The server speaks MCP over stdio. Point an MCP host at the `apps/fueld_b` package and provide `FDC_API_KEY` through its environment. If an existing Hermes MCP entry points to the app's previous location, update its working directory to `hermarium/apps/fueld_b` (or update its command to the new package path). This repository restructuring does not change any server registrations.
+The server speaks MCP over stdio. Configure an MCP host to launch this package over stdio and provide `FDC_API_KEY` through its environment. If an existing Hermes MCP entry points to `apps/fueld_b`, update its working directory to `packages/fueld_b` (or update its command to the new package path). This repository restructuring does not change any server registrations.
 
-See [`apps/fueld_b/README.md`](apps/fueld_b/README.md) for the server's tools, database location, configuration, and host setup.
+See [`packages/fueld_b/README.md`](packages/fueld_b/README.md) for the server's tools, database location, configuration, and host setup.
 
 ## Monorepo development
 
@@ -57,6 +58,13 @@ bun install
 bun run test
 bun run typecheck
 bun run start:fueld_b
+```
+
+Install the colocated Hermes skill from the repository root with:
+
+```sh
+mkdir -p ~/.hermes/skills/nutrition
+cp packages/fueld_b/skill/SKILL.md ~/.hermes/skills/nutrition/SKILL.md
 ```
 
 The workspace coordinates TypeScript packages without imposing a shared runtime or dependency model on future non-TypeScript components. Local `.env` files, SQLite data, and dependency directories are excluded from Git.
