@@ -1,0 +1,14 @@
+{
+  "name": "hermarium",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "start:fuel-db": "cd apps/fuel-db && bun src/index.ts",
+    "dev:fuel-db": "cd apps/fuel-db && bun --watch src/index.ts",
+    "test": "bun run --filter '*' test",
+    "typecheck": "bun run --filter '*' typecheck"
+  }
+}

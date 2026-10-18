@@ -1,0 +1,56 @@
+# fuel-db
+
+A nutrition tracking MCP server built with TypeScript, Bun, SQLite, and USDA FoodData Central. It uses the official MCP TypeScript server SDK over stdio and can run as its own package or through the Hermarium workspace.
+
+## Requirements
+
+- Bun (current stable)
+- USDA FoodData Central API key (`FDC_API_KEY`)
+
+## Setup and run
+
+From the Hermarium root:
+
+```sh
+bun install
+cp apps/fuel-db/.env.example apps/fuel-db/.env
+# Set FDC_API_KEY in apps/fuel-db/.env for local development.
+bun run start:fuel-db
+```
+
+To run directly from this package directory:
+
+```sh
+cd apps/fuel-db
+bun install
+cp .env.example .env
+# Set FDC_API_KEY in .env.
+bun run start
+```
+
+Bun loads `.env` files for local development. MCP hosts should provide `FDC_API_KEY` in the server process environment. Configure the host to launch `bun run start` with this package as its working directory, or use the package's absolute path in the command. The server writes protocol messages to stdout and diagnostics to stderr.
+
+## Configuration and data
+
+- `FDC_API_KEY` is required. Obtain a key from [USDA FoodData Central](https://fdc.nal.usda.gov/api-guide/). Keep it in a local `.env` file or secret environment variable; never commit it.
+- `FUEL_DB_PATH` optionally overrides the database file. Absolute paths are used as-is; relative paths resolve from this package root.
+- The default database is `apps/fuel-db/data/nutrition.sqlite`, resolved from the source package location rather than the process working directory. Its parent directory is created automatically.
+- SQLite data, WAL/SHM files, `.env` files, and dependencies are Git-ignored.
+
+The database enables foreign keys, a busy timeout, and WAL mode. File-backed databases are created with owner-only permissions. Versioned migrations live in `src/db/migrations/` and run transactionally at startup.
+
+## MCP tools
+
+- `resolve_identity(provider, externalId)`: Find or create the user associated with a messaging identity.
+- `link_identity(userId, provider, externalId)`: Link another identity to a user. The MCP host must verify control of both identities; this local server does not implement authentication.
+- `set_user_timezone(userId, timezone)`: Set a user's IANA timezone, such as `America/Chicago`.
+- `search_foods(query, pageSize?)`: Search USDA FoodData Central.
+- `get_food_nutrients(fdcId)`: Retrieve selected nutrient values per 100 g.
+- `log_food(userId, fdcId, quantityG, consumedAt?)`: Fetch USDA nutrients, scale them to the entered grams, and save a nutrient snapshot. Timestamps are normalized to UTC.
+- `daily_nutrition_summary(userId, date)`: Summarize entries for `YYYY-MM-DD` in that user's timezone, including DST-aware day boundaries.
+
+Each messaging identity is unique and maps to one user; a user can have multiple identities. Food history and timezone preferences are scoped to the user. FoodData Central values vary by source and can be approximate; this tool is intended for tracking, not medical advice.
+
+## Development
+
+From this package directory, run `bun test` and `bun run typecheck`. From the Hermarium root, use `bun run test` and `bun run typecheck` to run workspace checks. The USDA unit tests use a fake fetch; a live USDA integration test runs when `FDC_API_KEY` is available and sanitizes errors so credentials are not printed.
