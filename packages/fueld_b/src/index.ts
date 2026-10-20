@@ -1,3 +1,6 @@
+import { registerIdentityResolver } from "./identity-tool";
+import { createTrainingService } from "./training/runtime";
+import { registerTrainingTools } from "./training/tools";
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import * as z from "zod/v4";
@@ -19,10 +22,8 @@ const errorResult = (error: unknown) => ({
   isError: true,
 });
 
-server.registerTool("resolve_identity", {
-  description: "Resolve a stable sender identity to a nutrition user. A new platform/externalId pair creates a separate user and returns created: true; repeated calls return that same user.",
-  inputSchema: z.object({ platform: z.string().min(1).max(80), externalId: z.string().min(1).max(255) }),
-}, async ({ platform, externalId }) => textResult(service.resolveIdentity(platform, externalId)));
+registerIdentityResolver(server, new NutritionRepository(db));
+registerTrainingTools(server, createTrainingService(db));
 
 server.registerTool("link_identity", {
   description: "Link an additional platform sender identity to an existing user's nutrition history. Only use after verifying both identities belong to the same person.",

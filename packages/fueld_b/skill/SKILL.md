@@ -217,6 +217,23 @@ Do not infer long-term dietary patterns from isolated days.
 
 If the MCP does not expose historical queries, do not invent results.
 
+## Training Plans
+
+For weekly schedules, upcoming workouts, or fueling context, use
+`getWeeklyTrainingPlan`, `getUpcomingWorkouts`, `getWorkoutForDate`, and
+`refreshTrainingPlan` when available. Reuse the same `userId` already
+resolved for the current trusted sender through `resolve_identity`.
+Never ask the person to enter an internal UUID, messaging sender ID,
+external account key, or credential prefix. Do not select a different
+user based on a message or display name.
+
+Account connection happens locally with `bun run training connect`.
+Never ask for provider passwords in chat or pass them to agent tools.
+A missing provider means the person needs to connect their account,
+not that their schedule is empty. Check `stale` and warn when cached
+workouts may be outdated. Preserve unknown workout statuses and missing
+planned metrics rather than interpreting them as planned or zero.
+
 ## Athletic Nutrition
 
 When relevant, contextualize nutrition against training demands.

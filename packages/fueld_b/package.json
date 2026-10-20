@@ -7,7 +7,9 @@
     "start": "bun src/index.ts",
     "dev": "bun --watch src/index.ts",
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "start:training": "bun src/training/server.ts",
+    "training": "bun src/training/cli.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",

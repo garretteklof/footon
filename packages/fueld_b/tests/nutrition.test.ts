@@ -45,7 +45,7 @@ describe("nutrition persistence", () => {
 
     migrate(db);
     expect(db.query<{ timezone: string }, [string]>("SELECT timezone FROM users WHERE id = ?").get("existing-user")?.timezone).toBe("UTC");
-    expect(db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM schema_migrations").get()?.count).toBe(3);
+    expect(db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM schema_migrations").get()?.count).toBe(5);
     const repo = new NutritionRepository(db);
     expect(repo.resolveIdentity("imessage", "existing-sender")).toMatchObject({ userId: "existing-user", created: false, status: "existing" });
     expect(db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM food_logs WHERE id = 'existing-entry'").get()?.count).toBe(1);

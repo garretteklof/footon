@@ -68,3 +68,7 @@ cp packages/fueld_b/skill/SKILL.md ~/.hermes/skills/nutrition/SKILL.md
 ```
 
 The workspace coordinates TypeScript packages without imposing a shared runtime or dependency model on future non-TypeScript components. Local `.env` files, SQLite data, and dependency directories are excluded from Git.
+
+## Training plans
+
+Connect Final Surge with `bun run training connect`: choose an existing fueld_b profile, or enter your name to create the first local profile. The CLI discovers the account ID, stores credentials in the OS credential store, and syncs workouts. No sender environment variables or manual account identifiers are required. Generic training tools are included in fueld_b; a training-only MCP is also available through `bun run start:training`. See [setup and usage](packages/fueld_b/TRAINING.md).

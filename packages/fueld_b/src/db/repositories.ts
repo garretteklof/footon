@@ -107,16 +107,41 @@ export class NutritionRepository {
     if (result.changes === 0) throw new Error("User not found; resolve a messaging identity first");
   }
 
-  resolveIdentity(platform: string, externalId: string): { userId: string; created: boolean; status: "created" | "existing" } {
-    const existing = this.db.query<{ user_id: string }, [string, string]>(
+  listUsers(): { userId: string; name: string | null; timezone: string; identities: { platform: string; externalId: string }[] }[] {
+    return this.db.query<{ id: string; display_name: string | null; timezone: string }, []>(
+      "SELECT id, display_name, timezone FROM users ORDER BY created_at, rowid",
+    ).all().map(user => ({
+      userId: user.id, name: user.display_name, timezone: user.timezone,
+      identities: this.db.query<{ platform: string; externalId: string }, [string]>(
+        "SELECT platform, external_id AS externalId FROM identities WHERE user_id = ? ORDER BY platform, external_id",
+      ).all(user.id),
+    }));
+  }
+
+  setUserName(userId: string, name: string): void {
+    if (!name.trim() || name.trim().length > 100) throw new Error("Name must contain 1 to 100 characters");
+    this.assertUserExists(userId);
+    this.db.query("UPDATE users SET display_name = ? WHERE id = ?").run(name.trim(), userId);
+  }
+
+  findIdentity(platform: string, externalId: string): string | null {
+    return this.db.query<{ user_id: string }, [string, string]>(
       "SELECT user_id FROM identities WHERE platform = ? AND external_id = ?",
-    ).get(platform, externalId);
-    if (existing) return { userId: existing.user_id, created: false, status: "existing" };
+    ).get(platform, externalId)?.user_id ?? null;
+  }
+
+  resolveIdentity(platform: string, externalId: string, name?: string): { userId: string; created: boolean; status: "created" | "existing" } {
+    if (name !== undefined && (!name.trim() || name.trim().length > 100)) throw new Error("Name must contain 1 to 100 characters");
+    const existing = this.findIdentity(platform, externalId);
+    if (existing) {
+      if (name !== undefined) this.setUserName(existing, name);
+      return { userId: existing, created: false, status: "existing" };
+    }
 
     const userId = randomUUID();
     const now = new Date().toISOString();
     const create = this.db.transaction(() => {
-      this.db.query("INSERT INTO users (id, created_at) VALUES (?, ?)").run(userId, now);
+      this.db.query("INSERT INTO users (id, created_at, display_name) VALUES (?, ?, ?)").run(userId, now, name?.trim() ?? null);
       this.db.query("INSERT INTO identities (user_id, platform, external_id, created_at) VALUES (?, ?, ?, ?)")
         .run(userId, platform, externalId, now);
     });

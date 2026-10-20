@@ -41,7 +41,7 @@ The database enables foreign keys, a busy timeout, and WAL mode. File-backed dat
 
 ## MCP tools
 
-- `resolve_identity(platform, externalId)`: Resolve a stable sender ID to its nutrition user. A new platform/sender pair creates a separate user and returns `created: true`; repeated calls return the same user. Use `imessage` or `hermex` for these interfaces and pass their stable sender identifier, not a display name.
+- `resolve_identity(platform, externalId, name?)`: Resolve a stable sender ID to its nutrition user. A new platform/sender pair creates a separate user and returns `created: true`; repeated calls return the same user. Use `imessage` or `hermex` for these interfaces and pass their stable sender identifier, not a display name.
 - `link_identity(userId, platform, externalId)`: Link an additional identity to a user so both platforms share the same history. Verify that both identities belong to the same person first; this local server does not implement authentication. Link an identity before it is first resolved. If it already belongs to another profile, the tool returns an error and does not merge or move nutrition history.
 - `set_user_timezone(userId, timezone)`: Set a user's IANA timezone, such as `America/Chicago`.
 - `search_foods(query, pageSize?)`: Search USDA FoodData Central.
@@ -53,8 +53,14 @@ The database enables foreign keys, a busy timeout, and WAL mode. File-backed dat
 
 Each messaging identity is unique and maps to one user; a user can have multiple identities. Food history and timezone preferences are scoped to the user. FoodData Central values vary by source and can be approximate; this tool is intended for tracking, not medical advice.
 
-Identity mappings are stored in SQLite and survive restarts. Migration `003_identities.sql` copies mappings from the previous `messaging_identities` schema into `identities` without changing users or food logs. Unknown senders receive a new independent user rather than being attached to an existing profile; the resolver reports that creation explicitly.
+Identity mappings are stored in SQLite and survive restarts. Migration `003_identities.sql` copies mappings from the previous `messaging_identities` schema into `identities` without changing users or food logs. Unknown senders receive a new independent user rather than being attached to an existing profile; the resolver reports that creation explicitly. An optional `name` labels that same profile for local selection; it never determines identity or authorization.
 
 ## Development
 
 From this package directory, run `bun test` and `bun run typecheck`. From the Hermarium root, use `bun run test` and `bun run typecheck` to run workspace checks. The USDA unit tests use a fake fetch; a live USDA integration test runs when `FDC_API_KEY` is available and sanitizes errors so credentials are not printed.
+
+## Training context
+
+Run `bun run training connect`, select an existing person (or enter your name on first use) and Final Surge, then enter the login credentials. Connection discovers the account identifier and syncs automatically; credentials go into the native OS credential store. No training-specific environment variables or manual user/account IDs are needed. Existing unnamed users can receive a friendly label on their same profile during connection.
+
+Generic training tools are registered alongside nutrition and reuse the same `resolve_identity` result. The standalone training MCP is also available with `bun run start:training` and requires no USDA key. See [TRAINING.md](TRAINING.md) for CLI usage, host identity expectations, caching, compatibility, and unofficial API limitations.
