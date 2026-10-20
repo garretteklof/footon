@@ -3,12 +3,20 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { openDatabase } from "../src/db/database";
 
 async function host(trainingOnly: boolean) {
   const directory = mkdtempSync(join(tmpdir(), "fueld-mcp-"));
+  const databasePath = join(directory, "test.sqlite");
+  const users = {
+    USER_1_NAME: "Alex", USER_1_IMESSAGE_PHONE: "+15551234567", USER_1_TIMEZONE: "America/Chicago",
+    USER_1_FINAL_SURGE_EMAIL: "alex@example.test", USER_1_FINAL_SURGE_PASSWORD: "test-secret-one",
+    USER_2_NAME: "Sam", USER_2_IMESSAGE_PHONE: "+15559876543", USER_2_TIMEZONE: "America/Los_Angeles",
+    USER_2_FINAL_SURGE_EMAIL: "sam@example.test", USER_2_FINAL_SURGE_PASSWORD: "test-secret-two",
+  };
   const child = Bun.spawn([process.execPath, "src/index.ts", ...(trainingOnly ? ["--training-only"] : [])], {
     cwd: fileURLToPath(new URL("../", import.meta.url)),
-    env: { ...process.env, FUELD_B_PATH: join(directory, "test.sqlite"), FDC_API_KEY: trainingOnly ? "" : "test" },
+    env: { ...process.env, ...users, FUELD_B_PATH: databasePath, FDC_API_KEY: trainingOnly ? "" : "test" },
     stdin: "pipe", stdout: "pipe", stderr: "pipe",
   });
   const pending = new Map<number, (value: any) => void>();
@@ -37,29 +45,41 @@ async function host(trainingOnly: boolean) {
   try {
     await rpc("initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "test", version: "1" } });
     child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
-    return { rpc, close, call: (name: string, args: unknown) => rpc("tools/call", { name, arguments: args }) };
+    return { rpc, databasePath, close,
+      call: (name: string, args: unknown, senderId?: string) => rpc("tools/call", {
+        name, arguments: args,
+        ...(senderId ? { _meta: { "com.hermarium/trusted-sender": { platform: "bluebubbles", chatType: "dm", senderId } } } : {}),
+      }) };
   } catch (error) { await close(); throw error; }
 }
-test("full MCP preserves tool contracts, resolved identities, nutrition results, and errors", async () => {
+test("full MCP resolves only trusted senders and enforces per-user nutrition ownership", async () => {
   const h = await host(false);
   const value = (result: any) => JSON.parse(result.content[0].text);
   try {
     const tools = (await h.rpc("tools/list", {})).tools.map((tool: any) => tool.name);
-    expect(tools.sort()).toEqual(["resolve_identity", "link_identity", "set_user_timezone", "search_foods", "get_food_nutrients", "log_food", "update_entry", "delete_entry", "daily_nutrition_summary", "getWeeklyTrainingPlan", "getUpcomingWorkouts", "getWorkoutForDate", "refreshTrainingPlan"].sort());
-    const { userId } = value(await h.call("resolve_identity", { platform: "imessage", externalId: "test", name: "Alex" }));
-    expect(value(await h.call("resolve_identity", { platform: "imessage", externalId: "test" }))).toMatchObject({ userId, created: false });
-    await h.call("set_user_timezone", { userId, timezone: "America/Chicago" });
-    expect(value(await h.call("daily_nutrition_summary", { userId, date: "2026-10-20" })))
-      .toMatchObject({ timezone: "America/Chicago", totals: { entry_count: 0, calories_kcal: null }, entries: [] });
-    expect(value(await h.call("delete_entry", { userId, entryId: crypto.randomUUID() }))).toMatchObject({ success: false, error: { code: "not_found" } });
-    expect((await h.call("getWeeklyTrainingPlan", { userId })).isError).toBe(true);
-    expect((await h.call("set_user_timezone", { userId, timezone: "invalid" })).isError).toBe(true);
+    expect(tools.sort()).toEqual(["search_foods", "get_food_nutrients", "log_food", "update_entry", "delete_entry", "daily_nutrition_summary", "getWeeklyTrainingPlan", "getUpcomingWorkouts", "getWorkoutForDate", "refreshTrainingPlan"].sort());
+    const db = openDatabase(h.databasePath), entryId = crypto.randomUUID();
+    db.query("INSERT INTO food_logs VALUES (?,?,?,?,?,?,?)").run(entryId, "user-1", 9, "Apple", 100, "2026-10-20T15:00:00.000Z",
+      JSON.stringify({ caloriesKcal: 100, proteinG: 5, carbohydratesG: 20, fatG: 1, fiberG: 3, sodiumMg: 0 }));
+    db.close();
+    expect((await h.call("daily_nutrition_summary", { date: "2026-10-20" }, "+15551234567")).content[0].text)
+      .toContain('"entry_count": 1');
+    expect(value(await h.call("daily_nutrition_summary", { date: "2026-10-20" }, "+15559876543")))
+      .toMatchObject({ timezone: "America/Los_Angeles", totals: { entry_count: 0 }, entries: [] });
+    expect((await h.call("daily_nutrition_summary", { date: "2026-10-20" })).isError).toBe(true);
+    expect((await h.call("daily_nutrition_summary", { date: "2026-10-20", userId: "user-1" }, "+15559876543")).isError).toBe(true);
+    expect(value(await h.call("delete_entry", { entryId }, "+15559876543"))).toMatchObject({ success: false, error: { code: "forbidden" } });
+    expect(value(await h.call("delete_entry", { entryId }, "+15551234567"))).toMatchObject({ success: true });
+    expect((await h.call("daily_nutrition_summary", { date: "2026-10-20" }, "+15550000000")).isError).toBe(true);
+    const users = openDatabase(h.databasePath);
+    expect(users.query("SELECT id FROM users ORDER BY id").all()).toEqual([{ id: "user-1" }, { id: "user-2" }]);
+    users.close();
   } finally { await h.close(); }
 }, 10000);
 test("training-only MCP starts without a USDA key and exposes the same training tools", async () => {
   const h = await host(true);
   try {
     expect((await h.rpc("tools/list", {})).tools.map((tool: any) => tool.name).sort())
-      .toEqual(["resolve_identity", "getWeeklyTrainingPlan", "getUpcomingWorkouts", "getWorkoutForDate", "refreshTrainingPlan"].sort());
+      .toEqual(["getWeeklyTrainingPlan", "getUpcomingWorkouts", "getWorkoutForDate", "refreshTrainingPlan"].sort());
   } finally { await h.close(); }
 }, 10000);

@@ -1,16 +1,21 @@
 import { afterEach, expect, test } from "bun:test";
-import { openDatabase } from "../src/database";
-import { resolveIdentity, linkIdentity, getUser, listUsers, setUserName, setUserTimezone } from "../src/users";
-import { logFood, updateEntry, deleteEntry, dailySummary } from "../src/nutrition";
-import { FoodDataCentralClient } from "../src/food-data-central";
+import { openDatabase } from "../src/db/database";
+import { initializeUsers, getUser, userForSender } from "../src/users";
+import type { ConfiguredUser } from "../src/config";
+import { logFood, updateEntry, deleteEntry, dailySummary } from "../src/nutrition/nutrition";
+import { FoodDataCentralClient } from "../src/nutrition/food-data-central";
 import { utcRangeForLocalDay } from "../src/time";
 
 const databases: ReturnType<typeof openDatabase>[] = [];
 afterEach(() => { for (const db of databases.splice(0)) db.close(); });
 function fixture() {
   const db = openDatabase(":memory:"); databases.push(db);
-  const alice = resolveIdentity(db, "imessage", "alice", "Alice").userId;
-  const bob = resolveIdentity(db, "hermex", "bob", "Bob").userId;
+  const users: ConfiguredUser[] = [
+    { id: "user-1", name: "Alice", phone: "+15551234567", timezone: "America/Los_Angeles", finalSurge: { email: "a", password: "pw" } },
+    { id: "user-2", name: "Bob", phone: "+15559876543", timezone: "UTC", finalSurge: { email: "b", password: "pw" } },
+  ];
+  initializeUsers(db, users);
+  const alice = users[0].id, bob = users[1].id;
   const state = { calls: 0, calories: 100, fail: false, wrongId: false };
   const foods = new FoodDataCentralClient("test", async url => {
     state.calls++;
@@ -20,35 +25,29 @@ function fixture() {
     ] });
   });
   const log = (userId = alice, quantityG = 100, consumedAt = "2026-01-02T12:00:00Z") => logFood(db, foods, { userId, fdcId: 9, quantityG, consumedAt });
-  return { db, alice, bob, foods, state, log };
+  return { db, alice, bob, foods, state, log, users };
 }
-test("fresh schema has no migration machinery or calculated nutrient columns", () => {
+test("fresh schema contains only static users and no calculated nutrient columns", () => {
   const x = fixture();
   expect(x.db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map(row => row.name))
-    .toEqual(["food_logs", "identities", "training_accounts", "users"]);
+    .toEqual(["food_logs", "training_accounts", "users"]);
   expect(x.db.query<{ name: string }, []>("PRAGMA table_info(food_logs)").all().map(row => row.name))
     .toEqual(["id", "user_id", "fdc_id", "food_name", "quantity_g", "consumed_at", "nutrients_json"]);
 });
-test("identity resolution, labels, and linking preserve independent users", () => {
+test("configured phone numbers resolve to stable users and unknown senders do not create profiles", () => {
   const x = fixture();
-  linkIdentity(x.db, x.alice, "hermex", "also-alice"); linkIdentity(x.db, x.alice, "hermex", "also-alice");
-  expect(resolveIdentity(x.db, "hermex", "also-alice")).toMatchObject({ userId: x.alice, created: false });
-  expect(() => linkIdentity(x.db, x.bob, "hermex", "also-alice")).toThrow("another user");
-  expect(resolveIdentity(x.db, "imessage", "alice", "Renamed").userId).toBe(x.alice);
-  expect(getUser(x.db, x.alice).name).toBe("Renamed");
-  expect(resolveIdentity(x.db, "imessage", "new", "Renamed").userId).not.toBe(x.alice);
-  const count = listUsers(x.db).length;
-  expect(() => resolveIdentity(x.db, "test", "invalid", " ")).toThrow("Name");
-  expect(listUsers(x.db)).toHaveLength(count);
-  expect(() => setUserName(x.db, x.alice, "x".repeat(101))).toThrow("Name");
-  expect(() => resolveIdentity(x.db, "", "sender")).toThrow("identity");
+  expect(userForSender(x.users, "(555) 123-4567").id).toBe(x.alice);
+  expect(userForSender(x.users, "+1 555 987 6543").id).toBe(x.bob);
+  expect(() => userForSender(x.users, "+15550000000")).toThrow("Unrecognized");
+  expect(x.db.query("SELECT count(*) AS count FROM users").get()).toEqual({ count: 2 });
+  expect(getUser(x.db, x.alice).name).toBe("Alice");
 });
 test("logging scales snapshots and separates users and local days", async () => {
   const x = fixture(); await x.log(x.alice, 50, "2026-01-02T23:00:00-05:00");
-  const summary = dailySummary(x.db, x.alice, "2026-01-03");
+  const summary = dailySummary(x.db, x.alice, "2026-01-02");
   expect(summary.totals).toMatchObject({ entry_count: 1, calories_kcal: 50, protein_g: 2.5, sodium_mg: null });
   expect(summary.entries[0]).toMatchObject({ quantity_g: 50, consumed_at: "2026-01-03T04:00:00.000Z", calories_kcal: 50 });
-  expect(dailySummary(x.db, x.alice, "2026-01-02").totals.entry_count).toBe(0);
+  expect(dailySummary(x.db, x.alice, "2026-01-03").totals.entry_count).toBe(0);
   expect(dailySummary(x.db, x.bob, "2026-01-03").totals.entry_count).toBe(0);
 });
 test("missing and empty nutrient values remain null; measured zero remains zero", async () => {
@@ -100,14 +99,12 @@ test("invalid edits, dates, and quantities leave data unchanged", async () => {
   await expect(x.log(x.alice, -1)).rejects.toThrow("quantityG");
   await expect(x.log(x.alice, 10, "bad")).rejects.toThrow("consumedAt");
   expect(() => dailySummary(x.db, x.alice, "2026-02-30")).toThrow("YYYY-MM-DD");
-  expect(() => dailySummary(x.db, "missing", "2026-01-02")).toThrow("User not found");
+  expect(() => dailySummary(x.db, "missing", "2026-01-02")).toThrow("not initialized");
   expect(dailySummary(x.db, x.alice, "2026-01-02").entries[0]).toMatchObject({ quantity_g: 100 });
 });
 test("summaries use independent timezones and DST-aware day boundaries", async () => {
-  const x = fixture(); setUserTimezone(x.db, x.alice, "America/Los_Angeles");
+  const x = fixture();
   expect(getUser(x.db, x.bob).timezone).toBe("UTC");
-  expect(() => setUserTimezone(x.db, x.bob, "Mars/Olympus_Mons")).toThrow("IANA");
-  expect(() => setUserTimezone(x.db, x.bob, "+02:00")).toThrow("IANA");
   await x.log(x.alice, 100, "2026-03-08T07:30:00Z"); await x.log(x.alice, 100, "2026-03-08T08:30:00Z");
   expect(dailySummary(x.db, x.alice, "2026-03-07").totals.entry_count).toBe(1);
   expect(dailySummary(x.db, x.alice, "2026-03-08").totals.entry_count).toBe(1);

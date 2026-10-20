@@ -8,8 +8,7 @@
     "dev": "bun --watch src/index.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "start:training": "bun src/index.ts --training-only",
-    "training": "bun src/training/cli.ts"
+    "start:training": "bun src/index.ts --training-only"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",

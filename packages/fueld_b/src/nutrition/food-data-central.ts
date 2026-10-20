@@ -15,7 +15,7 @@ export class FoodDataCentralClient {
     private readonly http: (
       input: Request | string | URL,
       init?: RequestInit
-    ) => Promise<Response> = fetch;
+    ) => Promise<Response> = fetch,
   ) {}
   async searchFoods(query: string, pageSize = 10) {
     const body = await this.request("foods/search", {

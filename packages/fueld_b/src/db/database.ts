@@ -10,6 +10,10 @@ export function openDatabase(path: string): Database {
   try {
     if (path !== ":memory:") chmodSync(path, 0o600);
     db.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL;");
+    const userColumns = db.query<{ name: string }, []>("PRAGMA table_info(users)").all().map(column => column.name);
+    if (userColumns.length && !userColumns.includes("name")) {
+      db.exec("PRAGMA foreign_keys = OFF; DROP TABLE IF EXISTS food_logs; DROP TABLE IF EXISTS training_accounts; DROP TABLE IF EXISTS identities; DROP TABLE users; PRAGMA foreign_keys = ON;");
+    }
     db.transaction(() => db.exec(schema))();
     return db;
   } catch (error) { db.close(); throw error; }

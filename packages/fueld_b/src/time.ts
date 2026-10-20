@@ -7,7 +7,7 @@ export const localDateAt = (timestamp: number, timeZone: string) =>
 export function utcRangeForLocalDay(date: string, timeZone: string) {
   const day = Temporal.PlainDate.from(date);
   const midnight = (d: Temporal.PlainDate) =>
-    d.toZonedDateTime(timeZone).startOfDay().toInstant().toString();
+    d.toZonedDateTime(timeZone).startOfDay().toInstant().toString({ fractionalSecondDigits: 3 });
 
   return {
     start: midnight(day),
@@ -15,8 +15,10 @@ export function utcRangeForLocalDay(date: string, timeZone: string) {
   };
 }
 
-export const validateDate = (date: string) =>
-  Temporal.PlainDate.from(date).toString();
+export function validateDate(date: string) {
+  try { return Temporal.PlainDate.from(date).toString(); }
+  catch { throw new Error("date must be a valid YYYY-MM-DD"); }
+}
 
 export const addDays = (date: string, days: number) =>
   Temporal.PlainDate.from(date).add({ days }).toString();

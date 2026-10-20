@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { Database } from "bun:sqlite";
 import type { FoodDataCentralClient } from "./food-data-central";
-import { utcRangeForLocalDay, validateDate } from "./time";
-import { getUser } from "./users";
+import { utcRangeForLocalDay, validateDate } from "../time";
+import { getUser } from "../users";
 
 const columns = {
   caloriesKcal: "calories_kcal", proteinG: "protein_g", carbohydratesG: "carbohydrates_g",

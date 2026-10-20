@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { FoodDataCentralClient } from "../src/food-data-central";
+import { FoodDataCentralClient } from "../src/nutrition/food-data-central";
 
 const fdcApiKey = process.env.FDC_API_KEY;
 

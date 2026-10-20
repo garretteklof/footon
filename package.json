@@ -10,7 +10,6 @@
     "dev:fueld_b": "cd packages/fueld_b && bun --watch src/index.ts",
     "test": "bun run --filter '*' test",
     "typecheck": "bun run --filter '*' typecheck",
-    "start:training": "cd packages/fueld_b && bun src/index.ts --training-only",
-    "training": "cd packages/fueld_b && bun src/training/cli.ts"
+    "start:training": "cd packages/fueld_b && bun src/index.ts --training-only"
   }
 }
