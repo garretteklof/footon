@@ -5,7 +5,7 @@ const fdcApiKey = process.env.FDC_API_KEY;
 
 describe("FoodDataCentralClient", () => {
   test("searches and normalizes food results", async () => {
-    const fetcher = async (input: URL | RequestInfo) => {
+    const fetcher = async (input: Request | string | URL) => {
       expect(String(input)).toContain("api_key=test-key");
       return Response.json({ foods: [{ fdcId: 123, description: "Apple", dataType: "Foundation" }] });
     };

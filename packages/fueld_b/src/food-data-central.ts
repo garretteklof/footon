@@ -12,7 +12,10 @@ function summary(food: any) {
 export class FoodDataCentralClient {
   constructor(
     private readonly apiKey: string,
-    private readonly http: (input: URL | RequestInfo, init?: RequestInit) => Promise<Response> = fetch,
+    private readonly http: (
+      input: Request | string | URL,
+      init?: RequestInit
+    ) => Promise<Response> = fetch;
   ) {}
   async searchFoods(query: string, pageSize = 10) {
     const body = await this.request("foods/search", {

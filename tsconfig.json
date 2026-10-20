@@ -3,11 +3,12 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "lib": ["ESNext"],
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
     "types": ["bun", "node"],
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
   },
-  "include": []
+  "include": [],
 }
