@@ -1,5 +1,4 @@
 import { openDatabase } from "../src/db/database";
-import { initializeUsers } from "../src/users";
 import { getAccount, trainingPlan } from "../src/training/plans";
 import type { ConfiguredUser } from "../src/config";
 
@@ -9,9 +8,8 @@ export function closeFixtures() { for (const db of databases.splice(0)) db.close
 export function fixture(path = ":memory:") {
   const db = openDatabase(path); databases.push(db);
   const id = ++fixtureId;
-  const alice: ConfiguredUser = { id: "user-1", name: "Alice", phone: "+15551234567", timezone: "America/Chicago", finalSurge: { email: `alice-${id}`, password: "private-password" } };
-  const bob: ConfiguredUser = { id: "user-2", name: "Bob", phone: "+15559876543", timezone: "UTC", finalSurge: { email: `bob-${id}`, password: "private-password-2" } };
-  initializeUsers(db, [alice, bob]);
+  const alice: ConfiguredUser = { id: "user-1", name: "Alice", phone: "+15551234567", timezone: "America/Chicago", training: { provider: "final-surge", email: `alice-${id}`, password: "private-password" } };
+  const bob: ConfiguredUser = { id: "user-2", name: "Bob", phone: "+15559876543", timezone: "UTC", training: { provider: "final-surge", email: `bob-${id}`, password: "private-password-2" } };
   const state = { logins: [] as string[], tokens: [] as string[], ranges: [] as string[][], reject: false, unavailable: false,
     status: [] as number[], items: undefined as unknown[] | undefined };
   const http = (async (url: unknown, init?: RequestInit) => {
@@ -30,11 +28,4 @@ export function fixture(path = ":memory:") {
   return { db, alice: alice.id, bob: bob.id, aliceUser: alice, bobUser: bob, state, http,
     plan: (user: ConfiguredUser = alice, query: "week" | "refresh" | { days: number } | { date: string } = "refresh") => trainingPlan(db, user, query, http),
     account: (userId = alice.id) => getAccount(db, userId)! };
-}
-export function scriptedUI(answers: string[]) {
-  const output: string[] = [], prompts: { label: string; secret?: boolean }[] = [];
-  return { output, prompts, ui: {
-    log(message: string) { output.push(message); },
-    async ask(label: string, secret?: boolean) { prompts.push({ label, secret }); const value = answers.shift(); if (value === undefined) throw new Error("Cancelled"); return value; },
-  } };
 }

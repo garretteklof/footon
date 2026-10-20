@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Database } from "bun:sqlite";
 import type { FoodDataCentralClient } from "./food-data-central";
-import { utcRangeForLocalDay, validateDate } from "../time";
-import { getUser } from "../users";
+import { utcRangeForLocalDay, validateDate } from "../utils/time";
 
 const columns = {
   caloriesKcal: "calories_kcal", proteinG: "protein_g", carbohydratesG: "carbohydrates_g",
@@ -32,7 +31,6 @@ export async function logFood(db: Database, foods: FoodDataCentralClient, input:
   userId: string; fdcId: number; quantityG: number; consumedAt?: string;
 }) {
   if (!Number.isFinite(input.quantityG) || input.quantityG <= 0) throw new Error("quantityG must be greater than zero");
-  getUser(db, input.userId);
   const consumedAt = new Date(input.consumedAt ?? Date.now());
   if (Number.isNaN(consumedAt.getTime())) throw new Error("consumedAt must be a valid ISO date/time");
   const { food, nutrientsPer100g } = await foods.getFoodNutrients(input.fdcId);
@@ -85,9 +83,9 @@ export function deleteEntry(db: Database, userId: string, entryId: string) {
     return current;
   })();
 }
-export function dailySummary(db: Database, userId: string, date: string) {
+export function dailySummary(db: Database, userId: string, timezone: string, date: string) {
   validateDate(date);
-  const { timezone } = getUser(db, userId), { start, end } = utcRangeForLocalDay(date, timezone);
+  const { start, end } = utcRangeForLocalDay(date, timezone);
   const rows = db.query<StoredEntry, [string, string, string]>(
     `SELECT ${entryColumns} FROM food_logs WHERE user_id=? AND consumed_at>=? AND consumed_at<? ORDER BY consumed_at`,
   ).all(userId, start, end).map(entryFromRow);

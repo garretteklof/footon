@@ -1,51 +1,62 @@
-import { resolve } from "node:path";
+import { chmodSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { isValidTimeZone } from "./time";
+import * as z from "zod/v4";
+import { normalizePhone } from "./utils/phone";
+import { isValidTimeZone } from "./utils/time";
 
-const projectRoot = fileURLToPath(new URL("../", import.meta.url));
+const configPath = fileURLToPath(new URL("../config.local.json", import.meta.url));
+const trainingSchema = z.object({
+  provider: z.literal("final-surge"),
+  email: z.string().trim().min(1),
+  password: z.string().min(1),
+}).strict();
+const userSchema = z.object({
+  name: z.string().trim().min(1),
+  phone: z.string().min(1),
+  timezone: z.string().trim().min(1),
+  training: trainingSchema.optional(),
+}).strict();
 
-export type ConfiguredUser = {
-  id: "user-1" | "user-2";
-  name: string;
-  phone: string;
-  timezone: string;
-  finalSurge: { email: string; password: string };
-};
+export type ConfiguredUser = z.infer<typeof userSchema> & { id: string; phone: string };
 
-export function normalizePhone(value: string): string {
-  const compact = value.trim().replace(/[\s().-]/g, "").replace(/^00/, "+");
-  const e164 = compact.startsWith("+") ? compact : /^\d{10}$/.test(compact) ? `+1${compact}` : /^1\d{10}$/.test(compact) ? `+${compact}` : "";
-  if (!/^\+[1-9]\d{6,14}$/.test(e164)) throw new Error("Phone numbers must be E.164, or 10/11-digit US numbers");
-  return e164;
+const configSchema = z.object({
+  fdcApiKey: z.string().default(""),
+  users: z.record(
+    z.string().regex(/^[a-z][a-z0-9_-]*$/),
+    userSchema,
+  ).refine(users => Object.keys(users).length === 2, "Configure exactly two users"),
+}).strict();
+
+export function parseConfig(value: unknown) {
+  const input = configSchema.parse(value);
+  const users = Object.entries(input.users).map(([id, user]): ConfiguredUser => {
+    if (!isValidTimeZone(user.timezone)) {
+      throw new Error(`User ${id} must have a valid IANA timezone`);
+    }
+    return { ...user, id, phone: normalizePhone(user.phone) };
+  });
+
+  if (new Set(users.map(user => user.phone)).size !== users.length) {
+    throw new Error("Configured phone numbers must be unique");
+  }
+  return { fdcApiKey: input.fdcApiKey, users };
 }
 
-function required(env: NodeJS.ProcessEnv, name: string): string {
-  const value = env[name];
-  if (!value?.trim()) throw new Error(`${name} is required`);
-  return value;
-}
+export function loadConfig() {
+  let contents: string;
+  try {
+    chmodSync(configPath, 0o600);
+    contents = readFileSync(configPath, "utf8");
+  } catch {
+    throw new Error("Create packages/fueld_b/config.local.json");
+  }
 
-function configuredUser(env: NodeJS.ProcessEnv, slot: "1" | "2"): ConfiguredUser {
-  const timezone = required(env, `USER_${slot}_TIMEZONE`).trim();
-  if (!isValidTimeZone(timezone)) throw new Error(`USER_${slot}_TIMEZONE must be a valid IANA timezone`);
-  return {
-    id: slot === "1" ? "user-1" : "user-2",
-    name: required(env, `USER_${slot}_NAME`).trim(),
-    phone: normalizePhone(required(env, `USER_${slot}_IMESSAGE_PHONE`)),
-    timezone,
-    finalSurge: {
-      email: required(env, `USER_${slot}_FINAL_SURGE_EMAIL`).trim(),
-      password: required(env, `USER_${slot}_FINAL_SURGE_PASSWORD`),
-    },
-  };
-}
-
-export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
-  const users = [configuredUser(env, "1"), configuredUser(env, "2")];
-  if (users[0].phone === users[1].phone) throw new Error("Configured iMessage phone numbers must be unique");
-  return {
-    databasePath: resolve(projectRoot, env.FUELD_B_PATH || "data/nutrition.sqlite"),
-    fdcApiKey: env.FDC_API_KEY ?? "",
-    users,
-  };
+  try {
+    return parseConfig(JSON.parse(contents));
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      throw new Error("Invalid fueld_b configuration; check config.local.json fields and values");
+    }
+    throw error;
+  }
 }

@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { FoodDataCentralClient } from "../src/nutrition/food-data-central";
+import { loadConfig } from "../src/config";
 
-const fdcApiKey = process.env.FDC_API_KEY;
+const fdcApiKey = (() => { try { return loadConfig().fdcApiKey; } catch { return ""; } })();
 
 describe("FoodDataCentralClient", () => {
   test("searches and normalizes food results", async () => {
@@ -35,7 +36,7 @@ describe("FoodDataCentralClient", () => {
       .rejects.not.toThrow(secret);
   });
 
-  test.skipIf(!fdcApiKey)("queries live USDA search and nutrient endpoints when FDC_API_KEY is set", async () => {
+  test.skipIf(!fdcApiKey)("queries live USDA endpoints when config.local.json contains an API key", async () => {
     try {
       const client = new FoodDataCentralClient(fdcApiKey!);
       const foods = await client.searchFoods("apple", 1);
@@ -45,7 +46,7 @@ describe("FoodDataCentralClient", () => {
       expect(details.nutrientsPer100g.caloriesKcal).not.toBeNull();
     } catch {
       // Avoid surfacing fetch errors that could include request URLs or credentials.
-      throw new Error("Live USDA integration failed; check connectivity and FDC_API_KEY configuration.");
+      throw new Error("Live USDA integration failed; check connectivity and the fdcApiKey value in config.local.json.");
     }
   });
 });

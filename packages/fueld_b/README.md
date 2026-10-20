@@ -1,75 +1,74 @@
 # fueld_b
 
-fueld_b provides nutrition and training-plan tools for Hermes. It supports two users configured by environment variables.
+fueld_b provides nutrition and training tools to Hermes. It supports two statically configured users. Hermes must provide trusted sender metadata for private tools.
 
-## Install and run
+## Install and start
 
-From the Hermarium root:
+From the Hermarium root, install dependencies:
 
 ```sh
 bun install
 ```
 
-Set `FDC_API_KEY` in the environment or in `packages/fueld_b/.env` to run the full server. Then run:
+Create the local configuration file and replace its placeholder values:
+
+```sh
+cp packages/fueld_b/config.example.json packages/fueld_b/config.local.json
+chmod 600 packages/fueld_b/config.local.json
+```
+
+Start the server from the root:
 
 ```sh
 bun run start:fueld_b
 ```
 
-To run training without a USDA key, use:
-
-```sh
-bun run start:training
-```
+The package also supports `bun run dev` for watch mode. The server always exposes nutrition and training tools.
 
 ## Configuration and storage
 
-- `FDC_API_KEY` is the [USDA FoodData Central](https://fdc.nal.usda.gov/api-guide/) API key. The full server requires it. The training-only server does not.
-- `FUELD_B_PATH` optionally sets the SQLite file path. Relative paths start from this package. The default is `packages/fueld_b/data/nutrition.sqlite`.
-- Configure both users with `USER_1_*` and `USER_2_*` variables:
+`config.local.json` is the only application configuration file. It must define exactly two users under `users`. Each object key is the user's stable ID. Each user needs a name, phone number, and IANA time zone. fueld_b normalizes phone numbers to E.164 and rejects duplicate numbers.
 
-  | Suffix | Required value |
-  |---|---|
-  | `NAME` | Display name |
-  | `IMESSAGE_PHONE` | iMessage phone number; US 10/11-digit values and E.164 numbers are accepted |
-  | `TIMEZONE` | IANA timezone, such as `America/Chicago` |
-  | `FINAL_SURGE_EMAIL` | Final Surge login email |
-  | `FINAL_SURGE_PASSWORD` | Final Surge login password |
+Set `fdcApiKey` to a USDA FoodData Central API key to use nutrition tools. The server requires this key. See the [USDA API guide](https://fdc.nal.usda.gov/api-guide/).
 
-- Store these values in the Hermes service environment or a protected `packages/fueld_b/.env` file. Do not commit credentials. The MCP server does not return or log Final Surge credentials.
-- The two configured users have stable SQLite IDs. Startup updates their names and timezones from the environment. Unknown senders do not create users.
-- SQLite stores food logs and a cached Final Surge schedule for each user. Food logs retain their original nutrient snapshot. The legacy profile schema is reset on first start after this change; old records are not migrated.
-- The server authenticates to Final Surge with the matching user's configured login when training data is first requested. It caches the provider session in memory and workout data in SQLite.
-- USDA data can be incomplete or approximate.
+A user can have an optional `training` object with `provider`, `email`, and `password`. Set `provider` to `final-surge` to enable Final Surge. A user without training configuration can still use all nutrition tools. A training request for that user returns a clear configuration error.
+
+fueld_b reads configuration at startup. Do not commit `config.local.json`. It contains account credentials. The server does not return or log passwords.
+
+SQLite data lives in `packages/fueld_b/data/herm.sqlite`. fueld_b creates the directory and database as needed. The directory uses owner-only permissions. The database file uses owner read/write permissions. SQLite WAL files stay in the same ignored data directory. Food logs and training caches use the configured user IDs. You can delete existing development data. The schema does not support migrations.
+
+fueld_b caches Final Surge sessions in memory. It caches each user’s training schedule in SQLite. fueld_b retries expired sessions and retains a previous schedule if a refresh fails.
 
 ## Tools
 
-The full server provides these tools:
+The server provides these tools:
 
 | Tool | Capability |
 |---|---|
 | `search_foods` | Search USDA foods. |
 | `get_food_nutrients` | Get selected nutrient values per 100 g. |
 | `log_food` | Record food, quantity in grams, time, and nutrient values. |
-| `update_entry` | Update an owned food record. Quantity and time changes retain its nutrient values. A food change stores a new snapshot. |
+| `update_entry` | Update an owned food record. Quantity and time changes retain nutrient values. A food change stores a new snapshot. |
 | `delete_entry` | Delete an owned food record. |
 | `daily_nutrition_summary` | Return food records and nutrient totals for a local calendar day. |
 | `getWeeklyTrainingPlan` | Return the current Monday-to-Sunday schedule. |
 | `getUpcomingWorkouts` | Return workouts from today for up to 90 days. The default is 14 days. |
-| `getWorkoutForDate` | Return workouts for a date in the profile's timezone. |
-| `refreshTrainingPlan` | Return the current and following training weeks after a refresh. |
-
-The training-only server provides the four training tools. It does not require `FDC_API_KEY`.
+| `getWorkoutForDate` | Return workouts for a date in the user's time zone. |
+| `refreshTrainingPlan` | Refresh the current and following training weeks. |
 
 ## Identity and access
 
-Hermes forwards the actual BlueBubbles sender from its request-local transport context in MCP `_meta`. fueld_b accepts private data tools only for direct iMessage chats and resolves the sender against the two configured phone numbers. Private tool schemas do not accept user IDs. Unknown senders and calls without trusted metadata fail closed. Run fueld_b only as a local stdio child of the trusted Hermes host; an arbitrary MCP client can forge `_meta` and must not be given access to this server.
+Hermes forwards the BlueBubbles sender from its request-local transport context in MCP `_meta`. Private tools accept direct iMessage chats only. fueld_b resolves the sender against the configured phone numbers. Tool inputs do not accept user IDs. Unknown senders and missing metadata fail closed.
 
-## Development
+Run fueld_b only as a local stdio child of the trusted Hermes host. An arbitrary MCP client can forge `_meta` and must not have access to the server.
+
+## Development and tests
+
+From the package directory, run:
 
 ```sh
-FDC_API_KEY='' bun run test
+bun run test
 bun run typecheck
 ```
 
-Tests mock HTTP and use test-only environment credentials. They do not use a live Final Surge account. An empty USDA key skips the optional live USDA test.
+Tests use isolated temporary databases and mock USDA and Final Surge requests. The optional live USDA test runs only when `config.local.json` contains an API key.

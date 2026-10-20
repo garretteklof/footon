@@ -10,7 +10,7 @@ import { openDatabase } from "../src/db/database";
 beforeEach(() => setSystemTime(new Date("2026-10-20T12:00:00Z")));
 afterEach(() => { closeFixtures(); setSystemTime(); });
 
-test("environment credentials authenticate once and only normalized workouts enter SQLite", async () => {
+test("configured credentials authenticate once and only normalized workouts enter SQLite", async () => {
   const x = fixture();
   x.state.items = [
     { workout_date: "2026-10-20", name: "Workout", workout_status_text: "Planned", is_race: true, private_field: "discard",
@@ -26,7 +26,7 @@ test("environment credentials authenticate once and only normalized workouts ent
   expect(JSON.parse(cached)).toEqual(result.workouts);
   expect(cached).not.toContain("workout_date"); expect(cached).not.toContain("private_field");
   expect(JSON.stringify(result)).not.toContain("private-password");
-  expect(x.state.logins).toEqual([x.aliceUser.finalSurge.email]);
+  expect(x.state.logins).toEqual([x.aliceUser.training!.email]);
 });
 
 test("cache TTL, explicit refresh, and stale fallback preserve the last successful timestamp", async () => {
@@ -55,7 +55,7 @@ test("one user's cache and Final Surge session cannot be read by the other user"
   await x.plan(x.aliceUser, "refresh");
   x.state.items = [{ workout_date: "2026-10-20", name: "Bob plan" }];
   await x.plan(x.bobUser, "refresh");
-  expect(x.state.tokens.slice(-2)).toEqual(["Bearer token-" + x.aliceUser.finalSurge.email, "Bearer token-" + x.bobUser.finalSurge.email]);
+  expect(x.state.tokens.slice(-2)).toEqual(["Bearer token-" + x.aliceUser.training!.email, "Bearer token-" + x.bobUser.training!.email]);
   expect(getAccount(x.db, x.alice)!.accountId).not.toBe(getAccount(x.db, x.bob)!.accountId);
   expect((await x.plan(x.aliceUser, "week")).workouts[0].name).toBe("Alice plan");
   expect((await x.plan(x.bobUser, "week")).workouts[0].name).toBe("Bob plan");
@@ -63,14 +63,14 @@ test("one user's cache and Final Surge session cannot be read by the other user"
 
 test("account changes fail closed instead of serving the prior account's snapshot", async () => {
   const x = fixture(); await x.plan();
-  const changed = { ...x.aliceUser, finalSurge: { ...x.aliceUser.finalSurge, email: "different-account" } };
+  const changed = { ...x.aliceUser, training: { ...x.aliceUser.training!, email: "different-account" } };
   x.state.unavailable = true;
   await expect(x.plan(changed, "refresh")).rejects.toThrow("does not match");
 });
 
 test("the same Final Surge account cannot be assigned to both users", async () => {
   const x = fixture(); await x.plan();
-  const duplicate = { ...x.bobUser, finalSurge: x.aliceUser.finalSurge };
+  const duplicate = { ...x.bobUser, training: x.aliceUser.training! };
   await expect(x.plan(duplicate, "refresh")).rejects.toThrow("another user");
   expect(getAccount(x.db, x.bob)!.snapshot).toBeNull();
 });
@@ -78,10 +78,10 @@ test("the same Final Surge account cannot be assigned to both users", async () =
 test("Final Surge retries expired sessions once and applies rate-limit cooldowns", async () => {
   const x = fixture();
   await getWorkouts(x.aliceUser, null, "2026-10-19", "2026-11-01", x.http);
-  expect(x.state.logins).toEqual([x.aliceUser.finalSurge.email]);
+  expect(x.state.logins).toEqual([x.aliceUser.training!.email]);
   x.state.status = [401];
   await getWorkouts(x.aliceUser, null, "2026-10-19", "2026-11-01", x.http);
-  expect(x.state.logins).toEqual([x.aliceUser.finalSurge.email, x.aliceUser.finalSurge.email]);
+  expect(x.state.logins).toEqual([x.aliceUser.training!.email, x.aliceUser.training!.email]);
   const y = fixture(); y.state.status = [429];
   await expect(y.plan()).resolves.toMatchObject({ stale: true });
   await expect(y.plan()).resolves.toMatchObject({ stale: true });
@@ -114,4 +114,11 @@ test("SQLite refresh ordering prevents older responses replacing newer snapshots
     expect((await older).workouts[0].name).toBe("New");
     expect(JSON.parse(getAccount(other, x.alice)!.snapshot!)[0].name).toBe("New");
   } finally { other.close(); closeFixtures(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("users without a training provider get a clear error and no cache row", async () => {
+  const x = fixture();
+  const user = { ...x.aliceUser, training: undefined };
+  await expect(x.plan(user, "week")).rejects.toThrow("Training provider not configured");
+  expect(getAccount(x.db, user.id)).toBeNull();
 });

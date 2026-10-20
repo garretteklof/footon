@@ -1,16 +1,13 @@
 # Hermarium
 
-**A terrarium of Hermes tools.**
+A collection of tools for Hermes.
 
-## Package
+## Packages and skills
 
-- [fueld_b](packages/fueld_b/README.md): nutrition and training-plan tools.
-
-## Skills
-
-- [Nutrition](.agents/skills/nutrition/SKILL.md)
-- [Training](.agents/skills/training/SKILL.md)
+- [fueld_b](packages/fueld_b/README.md): nutrition and training tools.
+- [Nutrition skill](.agents/skills/nutrition/SKILL.md)
+- [Training skill](.agents/skills/training/SKILL.md)
 
 ## Quick start
 
-To install and start fueld_b, follow the [package guide](packages/fueld_b/README.md).
+Install dependencies with `bun install`. Configure fueld_b, then start it as described in the [package guide](packages/fueld_b/README.md).

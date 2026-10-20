@@ -1,6 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { addDays, localDateAt, validateDate } from "../time";
-import { getUser } from "../users";
+import { addDays, localDateAt, validateDate } from "../utils/time";
 import * as finalSurge from "./final-surge";
 import type { ConfiguredUser } from "../config";
 
@@ -10,19 +9,21 @@ export type Workout = {
   activities: { activityType: string | null; plannedAmount: number | null; plannedAmountUnit: string | null }[];
 };
 export type Account = {
-  userId: string; accountId: string | null; timezone: string;
+  userId: string; accountId: string | null;
   snapshot: string | null; start: string | null; end: string | null; syncedAt: string | null;
 };
 export function getAccount(db: Database, userId: string) {
   return db.query<Account, [string]>(`SELECT user_id AS userId, account_id AS accountId,
-    timezone, snapshot_json AS snapshot, start_date AS start, end_date AS end, synced_at AS syncedAt
-    FROM training_accounts JOIN users ON users.id=user_id WHERE user_id=?`).get(userId);
+    snapshot_json AS snapshot, start_date AS start, end_date AS end, synced_at AS syncedAt
+    FROM training_accounts WHERE user_id=?`).get(userId);
 }
 export async function trainingPlan(
   db: Database, user: ConfiguredUser, query: "week" | "refresh" | { days: number } | { date: string },
   http: typeof fetch = fetch,
 ) {
-  const { timezone } = getUser(db, user.id), userId = user.id;
+  if (!user.training) throw new Error("Training provider not configured for this user");
+  const timezone = user.timezone, userId = user.id;
+  db.query("INSERT INTO training_accounts (user_id) VALUES (?) ON CONFLICT(user_id) DO NOTHING").run(userId);
   const account = getAccount(db, userId)!;
   const today = localDateAt(Date.now(), timezone);
   const monday = addDays(today, -((new Date(today).getUTCDay() + 6) % 7)), nextSunday = addDays(monday, 13);
@@ -43,7 +44,7 @@ export async function trainingPlan(
     const refresh = db.query<{ refresh_version: number }, [string]>(
       "UPDATE training_accounts SET refresh_version=refresh_version+1 WHERE user_id=? RETURNING refresh_version",
     ).get(userId);
-    if (!refresh) throw new Error("Configured user is not initialized");
+    if (!refresh) throw new Error("Training cache could not be initialized");
     try {
       const { accountId, workouts } = await finalSurge.getWorkouts(user, account.accountId, fetchStart, fetchEnd, http);
       const owner = db.query<{ user_id: string }, [string, string]>(
@@ -63,7 +64,7 @@ export async function trainingPlan(
   const latest = getAccount(db, userId)!;
   const stale = failed || !fresh(latest);
   return {
-    provider: "final-surge", timezone, start, end, stale,
+    provider: user.training.provider, timezone, start, end, stale,
     warning: stale ? "Training provider unavailable; cached data may be incomplete or outdated" : null,
     syncedAt: latest.syncedAt,
     workouts: (JSON.parse(latest.snapshot ?? "[]") as Workout[]).filter(workout => workout.date >= start && workout.date <= end),

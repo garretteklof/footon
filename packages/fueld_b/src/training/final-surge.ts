@@ -1,4 +1,4 @@
-import { validateDate } from "../time";
+import { validateDate } from "../utils/time";
 import type { ConfiguredUser } from "../config";
 import type { Workout } from "./plans";
 
@@ -7,7 +7,7 @@ const text = (value: unknown) => typeof value === "string" ? value : null;
 type Credentials = { email: string; password: string };
 const sessions = new Map<string, Promise<{ token: string; userKey: string }>>();
 const retryAfter = new Map<string, number>();
-const sessionKey = (user: ConfiguredUser) => `${user.id}:${user.finalSurge.email}`;
+const sessionKey = (user: ConfiguredUser) => `${user.id}:${user.training?.email ?? ""}`;
 export class AccountMismatchError extends Error {}
 
 function normalize(raw: unknown): Workout {
@@ -41,10 +41,12 @@ async function login(credentials: Credentials, http: typeof fetch) {
   return { token: body.data.token, userKey: body.data.user_key };
 }
 async function session(user: ConfiguredUser, http: typeof fetch) {
+  const credentials = user.training;
+  if (!credentials) throw new Error("Training provider not configured for this user");
   const key = sessionKey(user);
   let pending = sessions.get(key);
   if (!pending) {
-    pending = login(user.finalSurge, http);
+    pending = login(credentials, http);
     sessions.set(key, pending);
     void pending.catch(() => { if (sessions.get(key) === pending) sessions.delete(key); retryAfter.set(key, Date.now() + 60000); });
   }
