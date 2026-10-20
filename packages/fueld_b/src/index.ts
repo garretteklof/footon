@@ -1,94 +1,82 @@
-import { registerIdentityResolver } from "./identity-tool";
-import { createTrainingService } from "./training/runtime";
-import { registerTrainingTools } from "./training/tools";
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import * as z from "zod/v4";
 import { loadConfig } from "./config";
-import { openDatabase } from "./db/database";
-import { NutritionRepository } from "./db/repositories";
-import { FoodDataCentralClient } from "./services/food-data-central";
-import { NutritionService } from "./services/nutrition";
+import { openDatabase } from "./database";
+import { resolveIdentity, linkIdentity, setUserTimezone } from "./users";
+import { FoodDataCentralClient } from "./food-data-central";
+import { logFood, updateEntry, deleteEntry, dailySummary } from "./nutrition";
+import { trainingPlan } from "./training/plans";
 
-const config = loadConfig();
-if (!config.fdcApiKey) throw new Error("FDC_API_KEY is required. See .env.example.");
-const db = openDatabase(config.databasePath);
-const service = new NutritionService(new NutritionRepository(db), new FoodDataCentralClient(config.fdcApiKey));
+const config = loadConfig(), trainingOnly = process.argv.includes("--training-only");
+if (!trainingOnly && !config.fdcApiKey) throw new Error("FDC_API_KEY is required. See README.md.");
+const db = openDatabase(config.databasePath), foods = new FoodDataCentralClient(config.fdcApiKey);
+const server = new McpServer({ name: trainingOnly ? "training-plans" : "fueld_b", version: "0.1.0" });
+const user = z.string().uuid().describe("Existing userId returned by resolve_identity for the trusted current sender; never ask the user to enter it");
+const result = async (work: () => unknown) => {
+  try { return { content: [{ type: "text" as const, text: JSON.stringify(await work(), null, 2) }] }; }
+  catch (error) { return { isError: true, content: [{ type: "text" as const, text: error instanceof Error ? error.message : "Request failed" }] }; }
+};
 
-const server = new McpServer({ name: "fueld_b", version: "0.1.0" });
-const textResult = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] });
-const errorResult = (error: unknown) => ({
-  content: [{ type: "text" as const, text: error instanceof Error ? error.message : "Unexpected error" }],
-  isError: true,
-});
+server.registerTool("resolve_identity", {
+  description: "Resolve the stable current sender supplied by Hermes. New sender identities get independent profiles; names are labels, never authorization.",
+  inputSchema: z.object({ platform: z.string().min(1).max(80), externalId: z.string().min(1).max(255), name: z.string().trim().min(1).max(100).optional() }),
+}, ({ platform, externalId, name }) => result(() => resolveIdentity(db, platform, externalId, name)));
+server.registerTool("getWeeklyTrainingPlan", {
+  description: "Current Monday–Sunday training week for the resolved current sender. Check stale and unknown statuses.",
+  inputSchema: z.object({ userId: user }).strict(),
+}, ({ userId }) => result(() => trainingPlan(db, userId, "week")));
+server.registerTool("getUpcomingWorkouts", {
+  description: "Upcoming workouts for the resolved current sender, including today, completed and unknown statuses.",
+  inputSchema: z.object({ userId: user, days: z.number().int().min(1).max(90).default(14) }).strict(),
+}, ({ userId, days }) => result(() => trainingPlan(db, userId, { days })));
+server.registerTool("getWorkoutForDate", {
+  description: "All workouts on a local date for the resolved current sender.",
+  inputSchema: z.object({ userId: user, date: z.string() }).strict(),
+}, ({ userId, date }) => result(() => trainingPlan(db, userId, { date })));
+server.registerTool("refreshTrainingPlan", {
+  description: "Refresh current and following training weeks for the resolved current sender.",
+  inputSchema: z.object({ userId: user }).strict(),
+}, ({ userId }) => result(() => trainingPlan(db, userId, "refresh")));
 
-registerIdentityResolver(server, new NutritionRepository(db));
-registerTrainingTools(server, createTrainingService(db));
-
-server.registerTool("link_identity", {
-  description: "Link an additional platform sender identity to an existing user's nutrition history. Only use after verifying both identities belong to the same person.",
-  inputSchema: z.object({ userId: z.string().uuid(), platform: z.string().min(1).max(80), externalId: z.string().min(1).max(255) }),
-}, async ({ userId, platform, externalId }) => {
-  try { service.linkIdentity(userId, platform, externalId); return textResult({ linked: true, userId, platform, externalId }); }
-  catch (error) { return errorResult(error); }
-});
-
-server.registerTool("set_user_timezone", {
-  description: "Set a user's IANA timezone. Daily summaries use this timezone while food timestamps remain stored in UTC.",
-  inputSchema: z.object({ userId: z.string().uuid(), timezone: z.string().min(1).max(100) }),
-}, async ({ userId, timezone }) => {
-  try { return textResult(service.setUserTimezone(userId, timezone)); } catch (error) { return errorResult(error); }
-});
-
-server.registerTool("search_foods", {
-  description: "Search USDA FoodData Central by food name or phrase.",
-  inputSchema: z.object({ query: z.string().min(1).max(200), pageSize: z.number().int().min(1).max(50).default(10) }),
-}, async ({ query, pageSize }) => {
-  try { return textResult(await service.searchFoods(query, pageSize)); } catch (error) { return errorResult(error); }
-});
-
-server.registerTool("get_food_nutrients", {
-  description: "Look up USDA nutrient values for one FoodData Central ID. Values are reported per 100 g where available.",
-  inputSchema: z.object({ fdcId: z.number().int().positive() }),
-}, async ({ fdcId }) => {
-  try { return textResult(await service.getFoodNutrients(fdcId)); } catch (error) { return errorResult(error); }
-});
-
-server.registerTool("log_food", {
-  description: "Log a quantity in grams for a user. Nutrients are fetched from USDA and stored as a per-entry snapshot so history remains stable.",
-  inputSchema: z.object({
-    userId: z.string().uuid(), fdcId: z.number().int().positive(), quantityG: z.number().positive(),
-    consumedAt: z.string().datetime({ offset: true }).optional(),
-  }),
-}, async ({ userId, fdcId, quantityG, consumedAt }) => {
-  try { return textResult(await service.logFood({ userId, fdcId, quantityG, consumedAt })); } catch (error) { return errorResult(error); }
-});
-
-server.registerTool("update_entry", {
-  description: "Correct a food log entry owned by a user. Update quantity in grams, explicitly select another USDA FDC food, or correct the consumed time. Quantity-only changes use the entry's stored nutrient snapshot.",
-  inputSchema: z.object({
-    userId: z.string().uuid(), entryId: z.string().uuid(),
-    quantityG: z.number().positive().optional(),
-    fdcId: z.number().int().positive().optional(),
-    consumedAt: z.string().datetime({ offset: true }).optional(),
-  }).refine(input => input.quantityG !== undefined || input.fdcId !== undefined || input.consumedAt !== undefined, {
-    message: "Provide at least one field to update",
-  }),
-}, async input => textResult(await service.updateEntry(input)));
-
-server.registerTool("delete_entry", {
-  description: "Delete a food log entry owned by a user. Returns the deleted entry or a structured missing/unauthorized error.",
-  inputSchema: z.object({ userId: z.string().uuid(), entryId: z.string().uuid() }),
-}, async ({ userId, entryId }) => textResult(service.deleteEntry(userId, entryId)));
-
-server.registerTool("daily_nutrition_summary", {
-  description: "Summarize a user's logged nutrition and entries for one calendar day in that user's IANA timezone.",
-  inputSchema: z.object({ userId: z.string().uuid(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }),
-}, async ({ userId, date }) => {
-  try { return textResult(service.dailySummary(userId, date)); } catch (error) { return errorResult(error); }
-});
-
+if (!trainingOnly) {
+  server.registerTool("link_identity", {
+    description: "Link another stable sender identity to this user's history, only after verifying both identities belong to the same person.",
+    inputSchema: z.object({ userId: user, platform: z.string().min(1).max(80), externalId: z.string().min(1).max(255) }),
+  }, ({ userId, platform, externalId }) => result(() => { linkIdentity(db, userId, platform, externalId); return { linked: true, userId, platform, externalId }; }));
+  server.registerTool("set_user_timezone", {
+    description: "Set an IANA timezone for local nutrition summaries and training schedules.",
+    inputSchema: z.object({ userId: user, timezone: z.string().min(1).max(100) }),
+  }, ({ userId, timezone }) => result(() => setUserTimezone(db, userId, timezone)));
+  server.registerTool("search_foods", {
+    description: "Search USDA FoodData Central by food name or phrase.",
+    inputSchema: z.object({ query: z.string().min(1).max(200), pageSize: z.number().int().min(1).max(50).default(10) }),
+  }, ({ query, pageSize }) => result(() => foods.searchFoods(query, pageSize)));
+  server.registerTool("get_food_nutrients", {
+    description: "Retrieve selected USDA nutrient values per 100 g.",
+    inputSchema: z.object({ fdcId: z.number().int().positive() }),
+  }, ({ fdcId }) => result(() => foods.getFoodNutrients(fdcId)));
+  server.registerTool("log_food", {
+    description: "Log grams consumed and a historical USDA nutrient snapshot for this user.",
+    inputSchema: z.object({ userId: user, fdcId: z.number().int().positive(), quantityG: z.number().positive(),
+      consumedAt: z.string().datetime({ offset: true }).optional() }),
+  }, input => result(() => logFood(db, foods, input)));
+  server.registerTool("update_entry", {
+    description: "Correct an owned food entry. Quantity/time changes preserve its snapshot; changing fdcId requires an explicit USDA food selection.",
+    inputSchema: z.object({ userId: user, entryId: z.string().uuid(), quantityG: z.number().positive().optional(),
+      fdcId: z.number().int().positive().optional(), consumedAt: z.string().datetime({ offset: true }).optional() })
+      .refine(input => input.quantityG !== undefined || input.fdcId !== undefined || input.consumedAt !== undefined, { message: "Provide at least one field to update" }),
+  }, input => result(() => updateEntry(db, foods, input)));
+  server.registerTool("delete_entry", {
+    description: "Delete an owned entry and return it, or a structured missing/unauthorized error.",
+    inputSchema: z.object({ userId: user, entryId: z.string().uuid() }),
+  }, ({ userId, entryId }) => result(() => deleteEntry(db, userId, entryId)));
+  server.registerTool("daily_nutrition_summary", {
+    description: "Summarize logged nutrition for a calendar day in this user's timezone.",
+    inputSchema: z.object({ userId: user, date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }),
+  }, ({ userId, date }) => result(() => dailySummary(db, userId, date)));
+}
 const handle = serveStdio(() => server);
-process.on("SIGINT", () => { void handle.close(); db.close(); });
-process.on("SIGTERM", () => { void handle.close(); db.close(); });
-console.error(`fueld_b MCP server running over stdio; SQLite: ${config.databasePath}`);
+for (const signal of ["SIGINT", "SIGTERM"] as const)
+  process.on(signal, () => { void handle.close(); db.close(); });
+console.error(`${trainingOnly ? "Training" : "fueld_b"} MCP server running over stdio; SQLite: ${config.databasePath}`);

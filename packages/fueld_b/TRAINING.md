@@ -1,75 +1,57 @@
 # Training plans
 
-Connect your training account from the Hermarium root:
+From the root or this package:
 
 ```sh
 bun run training connect
 ```
 
-1. Select an existing fueld_b user, or enter your name on first use.
-2. If training is not connected yet, select **Final Surge** and enter your Final Surge email and password once. Password input is hidden.
-3. If the selected person already has a connected account, the CLI uses the saved login and refreshes workouts without asking for details again.
+1. Select an existing person by name, or enter your name on first use.
+2. Select Final Surge and enter its email and password. Password input is hidden.
+3. The CLI discovers the account identifier, saves the credentials in the native OS store, and synchronizes the current and following training weeks.
 
-The CLI logs in, discovers the external account ID, connects it to that person, and synchronizes the current and following training weeks. No environment variables, internal UUIDs, external account IDs, messaging sender IDs, or credential prefixes need to be entered.
-
-Existing profiles with names appear by name, alongside their linked identities to distinguish duplicates. Older profiles have no name field populated: the first connection shows their existing linked identities and asks for a friendly name on the same profile. Existing profiles are reused. On an empty database, connection asks for your name, creates the first local profile through fueld_b's existing `resolveIdentity` mechanism using the current OS login, and sets its timezone from the local system. This happens after all prompts are completed, so cancelling or leaving a blank name does not create a profile. If login subsequently fails, that unconnected profile remains available for retry. No messaging account is inferred or linked by name. A verified messaging identity can later be linked to this same person using the existing `link_identity` workflow. Names are labels, never authorization.
-
-After connecting:
+Repeating connection selects the person and reuses the saved login. To replace it explicitly, run `bun run training connect --reauth`.
 
 ```sh
 bun run training upcoming
 bun run training refresh
 ```
 
-With one existing profile these commands select it automatically. With multiple profiles they ask which person to inspect. These local CLI commands are for the trusted machine operator; they are not exposed as account-selection tools to the model. `training connect` is safe to repeat: choosing a connected person reuses the saved login. The profile menu shows whether each person has a training connection. A fueld_b profile identifies the person; it does not itself contain a Final Surge login until the first connection succeeds. Names already saved on profiles are reused.
+Read commands select the sole profile automatically, or ask which person when several exist. Connection always confirms the person. Names label profiles; linked identities distinguish duplicates. First use creates a local profile through the same identity resolver, using the OS login, and sets the system timezone. No messaging identity is inferred from a name. A verified messaging identity can later be linked using `link_identity`.
 
-To explicitly replace a saved login, run `bun run training connect --reauth`. A rejected login preserves the previous connection. If authentication succeeds but initial sync fails, the connection is retained and the CLI tells you to retry `refresh`.
-
-The same commands work from `packages/fueld_b`. `FUELD_B_PATH` is optional, only when your existing nutrition database uses a custom path; otherwise the shared default is `packages/fueld_b/data/nutrition.sqlite`. No `FDC_API_KEY` is needed for the training-only CLI or server.
+No training-specific environment variables, user UUIDs, external keys, sender IDs, or credential prefixes are required. `FUELD_B_PATH` is optional when using a custom nutrition database. Training commands and `bun run start:training` require no USDA key.
 
 ## Credentials
 
-fueld_b previously used environment variables and had no appropriate persistent credential store. Training connection uses Bun's native `Bun.secrets` API: macOS Keychain, Linux Secret Service, or Windows Credential Manager. The OS may ask to unlock/allow access. Use a Bun version that supports this API. Linux requires a running Secret Service daemon. If the credential store is unavailable, connection fails with instructions; there is no plaintext fallback or custom encryption system.
+Email and password are saved together using `Bun.secrets`: macOS Keychain, Linux Secret Service, or Windows Credential Manager. Run the server as the same OS user who connected. The store may need to be unlocked; Linux needs a running Secret Service daemon. There is no plaintext fallback or environment-prefix compatibility.
 
-Both the login email and password go into one OS secret entry. SQLite stores only an automatically generated reference alongside the provider/account association. Passwords and bearer tokens never enter tool responses, command arguments, or workout storage. Tokens stay in memory and are separate per user/account. Reconnection replaces the reference and removes the previous credential entry. Run the server as the same OS user who connected the account.
+SQLite stores only an automatically generated secret reference. Reauthentication validates the new login before changing the connection, rotates the reference, and removes the previous entry. Authentication or storage failure preserves the old connection. A failed initial fetch retains the verified connection and reports a refresh instruction.
 
-Previously configured environment-backed accounts remain readable for compatibility. Use `training connect --reauth` once to move an existing account to native secret storage; the old environment variables can then be removed. Global `TRAINING_SENDER_ID` and `TRAINING_SENDER_PLATFORM` are no longer used.
+Bearer sessions remain in process memory, separated by credential reference. Authentication is shared between concurrent requests for that reference, retried once on 401/403, and backed off after failed authentication or rate limiting. HTTP requests have timeouts and reject redirects. Secrets and upstream response bodies are never returned to the agent.
 
-## Agent use
+Resetting the database does not remove entries from the OS credential store.
 
-Training tools are included in the existing fueld_b MCP server, alongside nutrition and `resolve_identity`. An existing fueld_b MCP registration needs no additional sender/account configuration after connection. Restart the server to discover the new tools. The full nutrition server still requires its existing `FDC_API_KEY`.
+## Snapshot cache
 
-For a standalone training-only MCP server:
+There is one authoritative representation: a normalized JSON array on each connected account. Its fields are:
 
-```sh
-bun run start:training
-```
+- `date`, `name`, `description`, `status`, `isRace`
+- `activities[]`: `activityType`, `plannedAmount`, `plannedAmountUnit`
 
-Both servers use the same identity resolver and database. Hermes supplies the current stable sender identity to `resolve_identity(platform, externalId, name?)`, as it already does for nutrition. The agent reuses the returned `userId` for `getWeeklyTrainingPlan(userId)`, `getUpcomingWorkouts(userId, days?)`, `getWorkoutForDate(userId, date)`, and `refreshTrainingPlan(userId)`. It should never ask a person for internal IDs or account settings. An optional name labels the profile without changing its identity. Existing linked identities resolve to the same person and provider automatically.
+The Final Surge adapter performs the only conversion. It reads planned amounts from `Activities[].planned_amount` and units from `planned_amount_type`; it never invents distances from names or adds activities together. Missing values stay null. Status text maps Planned/Completed to planned/completed; other values remain unknown. The provider's race flag becomes `isRace`. Names such as Workout and Rest Day are preserved.
 
-This deliberately reuses fueld_b's trusted-local-host contract, as selected for this integration. The current Hermes stdio MCP bridge does not supply authenticated sender metadata. Tool arguments are not independent proof of identity: Hermes must resolve the actual sender, enforce authorization, and avoid allowing a message to select another user's ID. The server scopes data by the supplied existing user but does not add transport authentication. Do not expose this stdio server directly to untrusted clients. If the host has no stable sender identity, the agent must ask for identity context rather than guess from a name or select the sole connected account.
+No native payload copy, workout rows, source-ID reconciliation, or range ledger is stored. The account association scopes each snapshot by user, provider, and external account. Only Final Surge is implemented; provider selection lives in `plans.ts`, and agent tools use its common workout model.
 
-## Provider architecture and cache
+The cache is fresh for 30 minutes when its fetched interval covers the requested dates. Fetches cover the current and next training weeks, extended for a requested historical date or longer upcoming range. A successful refresh replaces the entire snapshot; history outside it disappears. Failures retain the previous snapshot and successful-sync timestamp, return any matching cached workouts, and set `stale: true`.
 
-The generic `TrainingPlanService` resolves the configured provider from the existing person, handles local date ranges, caching, and reconciliation, and exposes normalized workouts. Only Final Surge is implemented; there is no registry. Nutrition and agent tools do not depend on Final Surge payloads.
+A counter allocated in SQLite orders refreshes across processes. Only the latest-started refresh for the unchanged connection may replace the snapshot. If it fails, earlier requests cannot overwrite the previous successful snapshot. Concurrent fetches are allowed; there is no request queue, background service, or general cache framework.
 
-The agent-facing workout shape contains only `date`, `name`, `description`, `status`, `isRace`, and activities with `activityType`, `plannedAmount`, and `plannedAmountUnit`. Missing values stay null; names and values are not invented. Provider/account/source IDs remain internal to cache identity and reconciliation. The raw cache keeps only `workout_date`, `name`, `description`, `workout_status_text`, `is_race`, and each activity's `activity_type_name`, `planned_amount`, and `planned_amount_type`. Users without a connected provider get connection instructions.
+The inspected API exposes no reliable workout edit timestamp or HTTP change validator. Freshness is time-based.
 
-Default fetch ranges cover the current and following Monday–Sunday weeks in the existing user's timezone, expanded to cover queries when needed. Freshness is 30 minutes. Forced refresh bypasses freshness, equivalent concurrent refreshes share a request, and each account has independent sync state. Successful fetched ranges are reconciled atomically, removing deleted workouts and upserting changed/moved IDs. Failures preserve cached workouts and successful sync timestamps and return `stale: true`. Out-of-range moved workouts are rediscovered when the destination range is fetched. There is no background service.
+## Agent identity
 
-## Unofficial API limitations
+The full nutrition MCP already includes the training tools. The standalone command uses the same entry point in training-only mode.
 
-Live WorkoutList responses place activity type, planned amount, and amount unit in `Activities[].activity_type_name`, `planned_amount`, and `planned_amount_type`. The adapter passes those through as readable activity fields without summing or converting them. It maps `workout_status_text` values `Planned` and `Completed` to normalized statuses; missing or unrecognized values remain `unknown`. Live race examples set `is_race: true`, so that provider flag is exposed as `isRace`. For October 11, 2026, the API returned `Chicago` with `is_race: true` and status `Completed`; for December 13, it returned `Marathon` with `is_race: true` and null status text, which remains `unknown`.
+Hermes must resolve the current stable sender through `resolve_identity` and reuse that `userId` for training. It must not choose accounts by name, accept another user's ID from message text, or ask for provider passwords in chat. Account connection belongs to the local CLI.
 
-The inspected workout objects contained no `updated_at`, modified timestamp, or version field. The HTTP responses had no `ETag` or `Last-Modified` header. Device sync timestamps describe external integrations, not workout edits, so they are not used as change markers. The service continues to refresh cached workout ranges after 30 minutes.
-
-Other provider fields are discarded when caching. A database migration compacts existing Final Surge cache rows to the same selected fields. The automated suite mocks HTTP and does not log in to your live account. Requests have timeouts, reject redirects, retry authentication once on 401/403, and apply cooldowns for login failures and rate limiting.
-
-## Tests
-
-```sh
-bun run typecheck
-FDC_API_KEY='' bun run test
-```
-
-Training tests mock HTTP and credential storage. They exercise fresh-database onboarding, cancellation, interactive connection, account discovery, hidden password prompts, login/store failures, reconnect cleanup, initial sync failures, names and linked identities, user/account isolation, stale-cache recovery, reconciliation, and independent sessions. They never access your real Keychain or Final Surge account. The empty USDA key disables the existing optional live USDA test.
+The stdio bridge does not authenticate tool arguments; authorization remains the existing trusted-host responsibility. A missing provider is an instruction to connect an account, not evidence of an empty schedule. Check stale warnings and preserve unknown statuses.

@@ -8,7 +8,7 @@
     "dev": "bun --watch src/index.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "start:training": "bun src/training/server.ts",
+    "start:training": "bun src/index.ts --training-only",
     "training": "bun src/training/cli.ts"
   },
   "dependencies": {

@@ -1,189 +1,136 @@
-import { afterEach, expect, test } from "bun:test";
-import { openDatabase } from "../src/db/database";
-import { NutritionRepository } from "../src/db/repositories";
-import { TrainingRepository } from "../src/training/repository";
-import { TrainingPlanService } from "../src/training/service";
-import { FinalSurgeProvider, normalizeFinalSurge } from "../src/training/providers/final-surge";
-import { createTrainingService } from "../src/training/runtime";
-import type { TrainingAccount } from "../src/training/model";
-const databases: ReturnType<typeof openDatabase>[] = [];
-afterEach(() => { for (const db of databases.splice(0))
-    db.close(); });
-function setup() {
-    const db = openDatabase(":memory:");
-    databases.push(db);
-    const users = new NutritionRepository(db), repo = new TrainingRepository(db);
-    const alice = { platform: "imessage", externalId: "alice" }, bob = { platform: "imessage", externalId: "bob" };
-    const a = users.resolveIdentity(alice.platform, alice.externalId).userId, b = users.resolveIdentity(bob.platform, bob.externalId).userId;
-    repo.configure(a, "final-surge", "account-a", "ALICE");
-    repo.configure(b, "final-surge", "account-b", "BOB");
-    const state = { now: new Date("2026-10-20T12:00:00Z"), calls: [] as string[], fail: false, items: [{ key: "same", workout_date: "2026-10-21", description: "Intervals", workout_completion: 0, Activities: [{ laps: [1, 2] }] }] };
-    const service = new TrainingPlanService(repo, () => ({ async getWorkouts(account, start, end) { state.calls.push(account.accountId + ":" + start + ":" + end); if (state.fail)
-            throw new Error("secret"); return state.items.map(r => normalizeFinalSurge(r, account)); } }), () => state.now);
-    return { db, users, repo, alice, bob, a, b, service, state };
-}
-test("linked identities and same source ID remain isolated by account", async () => {
-    const x = setup();
-    x.users.linkIdentity(x.a, "hermex", "also-alice");
-    const a = await x.service.getUpcomingWorkouts(x.alice), b = await x.service.getUpcomingWorkouts(x.bob);
-    expect((await x.service.getUpcomingWorkouts({ platform: "hermex", externalId: "also-alice" })).workouts).toEqual(a.workouts);
-    expect(x.db.query("SELECT 1 FROM training_workouts WHERE user_id=? AND account_id='account-a'").get(x.a)).toBeTruthy();
-    expect(x.db.query("SELECT 1 FROM training_workouts WHERE user_id=? AND account_id='account-b'").get(x.b)).toBeTruthy();
-    expect(x.state.calls.length).toBe(2);
-    expect(a.workouts[0].status).toBe("unknown");
-    expect(x.db.query<{
-        raw_json: string;
-    }, [
-    ]>("SELECT raw_json FROM training_workouts LIMIT 1").get()!.raw_json).toContain('"Activities"');
-    expect(() => x.service.getUpcomingWorkouts({ platform: "imessage", externalId: "unknown" })).toThrow("No training-plan provider");
-});
-test("two week sync, TTL, and independent refresh", async () => {
-    const x = setup();
-    await x.service.getWeeklyTrainingPlan(x.alice);
-    await x.service.getWeeklyTrainingPlan(x.bob);
-    expect(x.state.calls[0]).toBe("account-a:2026-10-19:2026-11-01");
-    await x.service.refreshTrainingPlan(x.alice);
-    await x.service.getWeeklyTrainingPlan(x.bob);
-    expect(x.state.calls.length).toBe(3);
-    x.state.now = new Date("2026-10-20T12:31:00Z");
-    await x.service.getWeeklyTrainingPlan(x.bob);
-    expect(x.state.calls.length).toBe(4);
-});
-test("timezone determines local week", async () => {
-    const x = setup();
-    x.users.setUserTimezone(x.a, "America/Chicago");
-    x.state.now = new Date("2026-10-19T02:00:00Z");
-    x.state.items = [];
-    const r = await x.service.refreshTrainingPlan(x.alice);
-    expect(r.start).toBe("2026-10-12");
-    expect(r.end).toBe("2026-10-25");
-});
-test("stale cache survives failures with sanitized warning", async () => {
-    const x = setup();
-    await x.service.refreshTrainingPlan(x.alice);
-    x.state.fail = true;
-    const r = await x.service.refreshTrainingPlan(x.alice);
-    expect(r.stale).toBe(true);
-    expect(r.workouts.length).toBe(1);
-    expect(JSON.stringify(r)).not.toContain("secret");
-});
-test("reconciles moved/deleted workouts and rejects invalid ranges atomically", async () => {
-    const x = setup();
-    await x.service.refreshTrainingPlan(x.alice);
-    x.state.items[0].workout_date = "2026-10-22";
-    await x.service.refreshTrainingPlan(x.alice);
-    expect((await x.service.getWorkoutForDate(x.alice, "2026-10-21")).workouts).toEqual([]);
-    x.state.items[0].workout_date = "2026-12-01";
-    expect((await x.service.refreshTrainingPlan(x.alice)).stale).toBe(true);
-    expect((await x.service.getWorkoutForDate(x.alice, "2026-10-22")).workouts.length).toBe(1);
-    x.state.items = [];
-    await x.service.refreshTrainingPlan(x.alice);
-    expect((await x.service.getUpcomingWorkouts(x.alice)).workouts).toEqual([]);
-});
-test("account and provider changes never return previous account cache", async () => {
-    const x = setup();
-    await x.service.refreshTrainingPlan(x.alice);
-    x.repo.configure(x.a, "future", "account-a", "ALICE");
-    await expect(createTrainingService(x.db).getUpcomingWorkouts(x.alice)).rejects.toThrow("Unsupported");
-    x.repo.configure(x.a, "final-surge", "new-account", "ALICE");
-    x.state.fail = true;
-    expect((await x.service.refreshTrainingPlan(x.alice)).workouts).toEqual([]);
-});
-test("coalesces refreshes, preserves multiple workouts and validates input", async () => {
-    const x = setup();
-    x.state.items.push({ ...x.state.items[0], key: "two" });
-    const r = await Promise.all([x.service.refreshTrainingPlan(x.alice), x.service.refreshTrainingPlan(x.alice)]);
-    expect(r[0].workouts.length).toBe(2);
-    expect(x.state.calls.length).toBe(1);
-    expect(() => x.service.getUpcomingWorkouts(x.alice, 0)).toThrow();
-    expect(() => x.service.getWorkoutForDate(x.alice, "2026-02-30")).toThrow();
-    expect((await x.service.getWeeklyTrainingPlan(x.a)).workouts).toEqual((await x.service.getWeeklyTrainingPlan(x.alice)).workouts);
-});
-const account = (id: string): TrainingAccount => ({ userId: id, provider: "final-surge", accountId: id, credentialsEnv: id.toUpperCase(), timezone: "UTC" });
-const fake = (fn: (url: string, init?: RequestInit) => Response) => ((url: unknown, init?: RequestInit) => Promise.resolve(fn(String(url), init))) as typeof fetch;
-test("independent sessions, coalesced logins, bearer auth without cookies", async () => {
-    let logins = 0;
-    const headers: string[] = [];
-    const client = new FinalSurgeProvider({ A_EMAIL: "a", A_PASSWORD: "p", B_EMAIL: "b", B_PASSWORD: "q" }, fake((url, init) => {
-        if (url.endsWith("/login")) {
-            logins++;
-            const email = JSON.parse(init!.body as string).email;
-            return Response.json({ success: true, data: { token: "token-" + email, user_key: email } });
-        }
-        headers.push((init!.headers as Record<string, string>).Authorization);
-        expect((init!.headers as Record<string, string>).Cookie).toBeUndefined();
-        expect(url).toContain("completedonly=false");
-        return Response.json({ data: [] });
-    }));
-    await Promise.all([client.getWorkouts(account("a"), "2026-10-19", "2026-11-01"), client.getWorkouts(account("a"), "2026-10-19", "2026-11-01"), client.getWorkouts(account("b"), "2026-10-19", "2026-11-01")]);
-    expect(logins).toBe(2);
-    expect(headers.sort()).toEqual(["Bearer token-a", "Bearer token-a", "Bearer token-b"]);
-});
-test("reauthenticates once on 401", async () => {
-    let logins = 0, requests = 0;
-    const client = new FinalSurgeProvider({ A_EMAIL: "a", A_PASSWORD: "p" }, fake(url => {
-        if (url.endsWith("/login")) {
-            logins++;
-            return Response.json({ success: true, data: { token: "t" + logins, user_key: "a" } });
-        }
-        requests++;
-        return requests === 1 ? new Response(null, { status: 401 }) : Response.json({ data: [] });
-    }));
-    await client.getWorkouts(account("a"), "2026-10-19", "2026-11-01");
-    expect(logins).toBe(2);
-    expect(requests).toBe(2);
-});
-test("rejects mismatched account and backs off", async () => {
-    let calls = 0;
-    const client = new FinalSurgeProvider({ A_EMAIL: "private", A_PASSWORD: "secret" }, fake(() => { calls++; return Response.json({ success: true, data: { token: "secret-token", user_key: "someone-else" } }); }));
-    await expect(client.getWorkouts(account("a"), "2026-10-19", "2026-11-01")).rejects.toThrow("does not match");
-    await expect(client.getWorkouts(account("a"), "2026-10-19", "2026-11-01")).rejects.toThrow("retry later");
-    expect(calls).toBe(1);
-});
-test("rate limiting cooldown avoids repeat requests", async () => {
-    let calls = 0;
-    const client = new FinalSurgeProvider({ A_EMAIL: "a", A_PASSWORD: "p" }, fake(url => { calls++; return url.endsWith("/login") ? Response.json({ success: true, data: { token: "t", user_key: "a" } }) : new Response(null, { status: 429, headers: { "Retry-After": "120" } }); }));
-    await expect(client.getWorkouts(account("a"), "2026-10-19", "2026-11-01")).rejects.toThrow("request failed");
-    await expect(client.getWorkouts(account("a"), "2026-10-19", "2026-11-01")).rejects.toThrow("retry later");
-    expect(calls).toBe(2);
-});
-test("exposes compact normalized output and caches only selected provider fields", () => {
-    const raw = { key: "w", workout_date: "2026-10-21T00:00:00", workout_status_text: "Planned", workout_completion: 0, is_race: true, name: null, description: "Warmup", planned_distance: 10, planned_distance_unit: "km", planned_duration_seconds: 3600, intensity: "easy", interval_details: "6 x 1 min", Activities: [{ activity_type_name: "Run", planned_amount: 2, planned_amount_type: "mi", amount: 4 }], unrecognized: { laps: [1, 2] } };
-    const row = normalizeFinalSurge(raw, account("a"));
-    expect(row.raw).toEqual({ workout_date: raw.workout_date, name: null, description: "Warmup", workout_status_text: "Planned", is_race: true, Activities: [{ activity_type_name: "Run", planned_amount: 2, planned_amount_type: "mi" }] });
-    expect(row.workout).toEqual({ date: "2026-10-21", name: null, description: "Warmup", status: "planned", isRace: true, activities: [{ activityType: "Run", plannedAmount: 2, plannedAmountUnit: "mi" }] });
-    expect(() => normalizeFinalSurge({ ...raw, workout_date: "2026-02-30" }, account("a"))).toThrow();
-});
-test("generic service can use another adapter without changing its interfaces", async () => {
-    const x = setup();
-    x.repo.configure(x.a, "example-test-only", "example-account", "ALICE");
-    const service = new TrainingPlanService(x.repo, a => ({ async getWorkouts() {
-            return [{ provider: a.provider, accountId: a.accountId, sourceId: "w", workout: { date: "2026-10-21", name: "Run", description: null, status: "planned", isRace: false, activities: [] }, raw: { source: "test" } }];
-        } }), () => new Date("2026-10-20T12:00:00Z"));
-    const r = await service.getUpcomingWorkouts(x.alice);
-    expect(r.provider).toBe("example-test-only");
-    expect(r.workouts[0].name).toBe("Run");
-});
+import { afterEach, beforeEach, expect, setSystemTime, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { fixture, closeFixtures } from "./training-fixture";
+import { trainingPlan, getAccount } from "../src/training/plans";
+import { getWorkouts } from "../src/training/final-surge";
+import { resolveIdentity, linkIdentity, setUserTimezone } from "../src/users";
+import { openDatabase } from "../src/database";
 
-test("maps observed WorkoutList activity and race fields to compact output", () => {
-    // Minimal anonymized shape from a real cached response; no source IDs or personal fields.
-    const raw = {
-        key: "planned-run", workout_date: "2026-10-21", name: "Run", workout_completion: 0, is_race: false,
-        workout_status_text: "Planned", Activities: [{
-            activity_type_name: "Run", planned_amount: 8, planned_amount_type: "mi",
-            planned_amount_normalized: 12874.7767, planned_duration: null,
-            amount: null, amount_type: null, duration: null,
-        }],
-    };
-    const result = normalizeFinalSurge(raw, account("a"));
-    expect(result.workout.activities[0]).toEqual({ activityType: "Run", plannedAmount: 8, plannedAmountUnit: "mi" });
-    expect(result.workout.status).toBe("planned"); expect(result.workout.isRace).toBe(false);
-    expect(result.raw).toEqual({ workout_date: "2026-10-21", name: "Run", description: null, workout_status_text: "Planned", is_race: false, Activities: [{ activity_type_name: "Run", planned_amount: 8, planned_amount_type: "mi" }] });
+beforeEach(() => setSystemTime(new Date("2026-10-20T12:00:00Z")));
+afterEach(() => { closeFixtures(); setSystemTime(); });
+
+test("one normalized snapshot preserves genuine names, planned metrics, races, and unknown values", async () => {
+  const x = fixture();
+  x.state.items = [
+    { workout_date: "2026-10-20", name: "Workout", workout_status_text: "Planned", is_race: true, private_field: "discard",
+      Activities: [{ activity_type_name: "Run", planned_amount: 8, planned_amount_type: "mi", amount: 9 }] },
+    { workout_date: "2026-10-21", name: "Rest Day", workout_status_text: null, Activities: [] },
+  ];
+  const result = await x.connect();
+  expect(result.sync.workouts).toEqual([
+    { date: "2026-10-20", name: "Workout", description: null, status: "planned", isRace: true, activities: [{ activityType: "Run", plannedAmount: 8, plannedAmountUnit: "mi" }] },
+    { date: "2026-10-21", name: "Rest Day", description: null, status: "unknown", isRace: null, activities: [] },
+  ]);
+  const stored = getAccount(x.db, x.alice)!.snapshot!;
+  expect(JSON.parse(stored)).toEqual(result.sync.workouts);
+  expect(stored).not.toContain("workout_date"); expect(stored).not.toContain("private_field"); expect(stored).not.toContain("amount_type");
 });
-test("cache stores compact normalized output beside the original raw response", () => {
-    const x=setup(),a=x.repo.accountForSender(x.alice);
-    const raw={key:"run",workout_date:"2026-10-21",name:"Run",workout_status_text:"Planned",is_race:true,Activities:[{activity_type_name:"Run",planned_amount:8,planned_amount_type:"mi"}]};
-    x.repo.replaceRange(a,"2026-10-19","2026-11-01",[normalizeFinalSurge(raw,a)],"2026-10-20T12:00:00Z");
-    expect(x.repo.read(a,"2026-10-21","2026-10-21")[0]).toEqual({date:"2026-10-21",name:"Run",description:null,status:"planned",isRace:true,activities:[{activityType:"Run",plannedAmount:8,plannedAmountUnit:"mi"}]});
-    expect(JSON.parse(x.db.query<{raw_json:string},[]>("SELECT raw_json FROM training_workouts").get()!.raw_json)).toEqual({ workout_date: "2026-10-21", name: "Run", description: null, workout_status_text: "Planned", is_race: true, Activities: [{ activity_type_name: "Run", planned_amount: 8, planned_amount_type: "mi" }] });
+test("cached reads, TTL, forced refresh, and failure fallback retain the last successful timestamp", async () => {
+  const x = fixture(); await x.connect();
+  expect(x.state.ranges[0]).toEqual(["2026-10-19", "2026-11-01"]);
+  await trainingPlan(x.db, x.alice, "week", x.secrets, x.http); expect(x.state.ranges).toHaveLength(1);
+  x.db.query("UPDATE training_accounts SET synced_at=? WHERE user_id=?").run("2026-10-20T11:00:00Z", x.alice);
+  await trainingPlan(x.db, x.alice, "week", x.secrets, x.http); expect(x.state.ranges).toHaveLength(2);
+  const syncedAt = getAccount(x.db, x.alice)!.syncedAt; x.state.unavailable = true;
+  const stale = await trainingPlan(x.db, x.alice, "refresh", x.secrets, x.http);
+  expect(stale.stale).toBe(true); expect(stale.workouts).toHaveLength(1); expect(stale.syncedAt).toBe(syncedAt);
+  expect(JSON.stringify(stale)).not.toContain("503");
+});
+test("successful refresh replaces deleted/moved workouts and invalid payloads preserve the snapshot", async () => {
+  const x = fixture(); await x.connect(); const old = getAccount(x.db, x.alice)!.snapshot;
+  x.state.items = [{ workout_date: "2026-02-30" }];
+  expect((await trainingPlan(x.db, x.alice, "refresh", x.secrets, x.http)).stale).toBe(true);
+  expect(getAccount(x.db, x.alice)!.snapshot).toBe(old);
+  x.state.items = [{ workout_date: "2026-10-22", name: "Moved" }];
+  expect((await trainingPlan(x.db, x.alice, "refresh", x.secrets, x.http)).workouts[0].date).toBe("2026-10-22");
+  x.state.items = [];
+  expect((await trainingPlan(x.db, x.alice, "refresh", x.secrets, x.http)).workouts).toEqual([]);
+});
+test("replacement snapshots intentionally discard older history", async () => {
+  const x = fixture(); await x.connect();
+  x.state.items = [{ workout_date: "2026-10-11", name: "Chicago", is_race: true, workout_status_text: "Completed" }];
+  expect((await trainingPlan(x.db, x.alice, { date: "2026-10-11" }, x.secrets, x.http)).workouts[0].isRace).toBe(true);
+  x.state.items = [{ workout_date: "2026-12-13", name: "Marathon", is_race: true }];
+  expect((await trainingPlan(x.db, x.alice, { date: "2026-12-13" }, x.secrets, x.http)).workouts[0].status).toBe("unknown");
+  x.state.unavailable = true;
+  const past = await trainingPlan(x.db, x.alice, { date: "2026-10-11" }, x.secrets, x.http);
+  expect(past.stale).toBe(true); expect(past.workouts).toEqual([]);
+});
+test("linked identities reuse the resolved user; accounts and provider selection remain isolated", async () => {
+  const x = fixture(); await x.connect(); await x.connect(x.bob, "bob");
+  linkIdentity(x.db, x.alice, "hermex", "also-alice");
+  const linked = resolveIdentity(x.db, "hermex", "also-alice").userId;
+  await trainingPlan(x.db, linked, "refresh", x.secrets, x.http);
+  await trainingPlan(x.db, x.bob, "refresh", x.secrets, x.http);
+  expect(x.state.tokens.slice(-2)).toEqual(["Bearer token-alice", "Bearer token-bob"]);
+  x.db.query("UPDATE training_accounts SET provider='unsupported' WHERE user_id=?").run(x.alice);
+  await expect(trainingPlan(x.db, x.alice, "week", x.secrets, x.http)).rejects.toThrow("Unsupported");
+});
+test("switching external accounts never exposes the previous account snapshot", async () => {
+  const x = fixture(); await x.connect(); x.state.unavailable = true;
+  const changed = await x.connect(x.alice, "different");
+  expect(changed.sync.stale).toBe(true); expect(changed.sync.workouts).toEqual([]);
+  expect(getAccount(x.db, x.alice)!.accountId).toBe("external-different");
+});
+test("local timezone determines the week and request bounds are validated", async () => {
+  const x = fixture(); await x.connect();
+  setUserTimezone(x.db, x.alice, "America/Chicago"); setSystemTime(new Date("2026-10-19T02:00:00Z"));
+  const result = await trainingPlan(x.db, x.alice, "refresh", x.secrets, x.http);
+  expect(result.start).toBe("2026-10-12"); expect(result.end).toBe("2026-10-25");
+  for (const days of [0, 91, 1.5]) await expect(trainingPlan(x.db, x.alice, { days }, x.secrets, x.http)).rejects.toThrow("days");
+  await expect(trainingPlan(x.db, x.alice, { date: "2026-02-30" }, x.secrets, x.http)).rejects.toThrow("YYYY-MM-DD");
+});
+test("native-secret login is shared per connection and retries authentication once", async () => {
+  const x = fixture(), account = await x.seed();
+  await Promise.all([getWorkouts(account, "2026-10-19", "2026-11-01", x.secrets, x.http), getWorkouts(account, "2026-10-19", "2026-11-01", x.secrets, x.http)]);
+  expect(x.state.logins).toEqual(["alice"]);
+  x.state.status = [401];
+  await getWorkouts(account, "2026-10-19", "2026-11-01", x.secrets, x.http);
+  expect(x.state.logins).toEqual(["alice", "alice"]);
+});
+test("mismatched login accounts and rate limiting fail safely with cooldowns", async () => {
+  const x = fixture(), a = await x.seed();
+  x.values.set(a.credentialRef, JSON.stringify({ email: "different", password: "pw" }));
+  await expect(getWorkouts(a, "2026-10-19", "2026-11-01", x.secrets, x.http)).rejects.toThrow("does not match");
+  await expect(getWorkouts(a, "2026-10-19", "2026-11-01", x.secrets, x.http)).rejects.toThrow("retry later");
+  const y = fixture(), b = await y.seed(); y.state.status = [429];
+  await expect(getWorkouts(b, "2026-10-19", "2026-11-01", y.secrets, y.http)).rejects.toThrow("request failed");
+  await expect(getWorkouts(b, "2026-10-19", "2026-11-01", y.secrets, y.http)).rejects.toThrow("retry later");
+  expect(y.state.ranges).toHaveLength(1);
+});
+test("SQLite ordering prevents an older response overwriting newer results across connections", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "training-concurrency-"));
+  const path = join(directory, "cache.sqlite"), x = fixture(path);
+  const other = openDatabase(path);
+  try {
+    await x.connect();
+    const releases: ((response: Response) => void)[] = [];
+    const http = (async (_url: unknown) => new Promise<Response>(resolve => releases.push(resolve))) as typeof fetch;
+    const older = trainingPlan(x.db, x.alice, "refresh", x.secrets, http);
+    while (releases.length < 1) await Bun.sleep(1);
+    const newer = trainingPlan(other, x.alice, "refresh", x.secrets, http);
+    while (releases.length < 2) await Bun.sleep(1);
+    releases[1](Response.json({ data: [{ workout_date: "2026-10-21", name: "New" }] }));
+    await newer;
+    releases[0](Response.json({ data: [{ workout_date: "2026-10-21", name: "Old" }] }));
+    const result = await older;
+    expect(result.workouts[0].name).toBe("New");
+    expect(JSON.parse(getAccount(other, x.alice)!.snapshot!)[0].name).toBe("New");
+  } finally { other.close(); closeFixtures(); rmSync(directory, { recursive: true, force: true }); }
+});
+test("a failed newest refresh keeps the last snapshot and blocks an older in-flight replacement", async () => {
+  const x = fixture(); await x.connect(); const previous = getAccount(x.db, x.alice)!.snapshot;
+  const releases: ((response: Response) => void)[] = [];
+  const http = (async (_url: unknown) => new Promise<Response>(resolve => releases.push(resolve))) as typeof fetch;
+  const older = trainingPlan(x.db, x.alice, "refresh", x.secrets, http);
+  while (releases.length < 1) await Bun.sleep(1);
+  const newer = trainingPlan(x.db, x.alice, "refresh", x.secrets, http);
+  while (releases.length < 2) await Bun.sleep(1);
+  releases[1](new Response(null, { status: 503 }));
+  expect((await newer).stale).toBe(true);
+  releases[0](Response.json({ data: [{ workout_date: "2026-10-21", name: "Obsolete" }] }));
+  await older;
+  expect(getAccount(x.db, x.alice)!.snapshot).toBe(previous);
 });

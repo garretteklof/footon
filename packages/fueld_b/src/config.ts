@@ -1,19 +1,11 @@
-import { isAbsolute, join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 
-export interface Config {
-  databasePath: string;
-  fdcApiKey: string;
-}
-
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const configuredDatabasePath = env.FUELD_B_PATH;
+export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
   return {
-    databasePath: configuredDatabasePath
-      ? isAbsolute(configuredDatabasePath) ? configuredDatabasePath : resolve(projectRoot, configuredDatabasePath)
-      : join(projectRoot, "data", "nutrition.sqlite"),
+    databasePath: resolve(projectRoot, env.FUELD_B_PATH || "data/nutrition.sqlite"),
     fdcApiKey: env.FDC_API_KEY ?? "",
   };
 }

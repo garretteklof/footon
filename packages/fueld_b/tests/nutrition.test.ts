@@ -1,295 +1,116 @@
-import { describe, expect, test } from "bun:test";
-import { migrate, openDatabase } from "../src/db/database";
-import { NutritionRepository } from "../src/db/repositories";
-import { NutritionService } from "../src/services/nutrition";
-import type { FoodDataCentralClient } from "../src/services/food-data-central";
+import { afterEach, expect, test } from "bun:test";
+import { openDatabase } from "../src/database";
+import { resolveIdentity, linkIdentity, getUser, listUsers, setUserName, setUserTimezone } from "../src/users";
+import { logFood, updateEntry, deleteEntry, dailySummary } from "../src/nutrition";
+import { FoodDataCentralClient } from "../src/food-data-central";
 import { utcRangeForLocalDay } from "../src/time";
-import { Database } from "bun:sqlite";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 
-const nutrients = { caloriesKcal: 100, proteinG: 5, carbohydratesG: 20, fatG: 2, fiberG: 3, sodiumMg: 10 };
-
-describe("nutrition persistence", () => {
-  test("migrates schema and supports many identities for one user", () => {
-    const db = openDatabase(":memory:");
-    const repo = new NutritionRepository(db);
-    const first = repo.resolveIdentity("imessage", "abc");
-    const second = repo.resolveIdentity("hermex", "xyz");
-    repo.linkIdentity(first.userId, "hermex", "shared-hermex-sender");
-    expect(first.status).toBe("created");
-    expect(repo.resolveIdentity("imessage", "abc").status).toBe("existing");
-    expect(repo.resolveIdentity("imessage", "abc").userId).toBe(first.userId);
-    expect(repo.resolveIdentity("hermex", "shared-hermex-sender").userId).toBe(first.userId);
-    expect(second.userId).not.toBe(first.userId);
-    expect(() => repo.linkIdentity(first.userId, "hermex", "shared-hermex-sender")).not.toThrow();
-    expect(() => repo.linkIdentity(second.userId, "imessage", "abc")).toThrow("already linked");
-    db.close();
+const databases: ReturnType<typeof openDatabase>[] = [];
+afterEach(() => { for (const db of databases.splice(0)) db.close(); });
+function fixture() {
+  const db = openDatabase(":memory:"); databases.push(db);
+  const alice = resolveIdentity(db, "imessage", "alice", "Alice").userId;
+  const bob = resolveIdentity(db, "hermex", "bob", "Bob").userId;
+  const state = { calls: 0, calories: 100, fail: false, wrongId: false };
+  const foods = new FoodDataCentralClient("test", async url => {
+    state.calls++;
+    if (state.fail) throw new Error("private URL");
+    return Response.json({ fdcId: state.wrongId ? 999 : Number(new URL(String(url)).pathname.split("/").at(-1)), description: "Apple", foodNutrients: [
+      { nutrient: { number: "208" }, amount: state.calories }, { nutrient: { number: "203" }, amount: 5 },
+    ] });
   });
-
-  test("adds timezone defaults when upgrading an existing database", () => {
-    const db = new Database(":memory:");
-    db.exec("CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL);");
-    db.exec(readFileSync(new URL("../src/db/migrations/001_initial.sql", import.meta.url), "utf8"));
-    db.query("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run("001_initial.sql", "2026-01-01T00:00:00.000Z");
-    db.query("INSERT INTO users (id, created_at) VALUES (?, ?)").run("existing-user", "2026-01-01T00:00:00.000Z");
-    db.query("INSERT INTO messaging_identities (provider, external_id, user_id, created_at) VALUES (?, ?, ?, ?)")
-      .run("imessage", "existing-sender", "existing-user", "2026-01-01T00:00:00.000Z");
-    db.query(`INSERT INTO food_logs (
-      id, user_id, fdc_id, food_name, quantity_g, consumed_at,
-      calories_kcal, protein_g, carbohydrates_g, fat_g, fiber_g, sodium_mg,
-      nutrients_json, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run("existing-entry", "existing-user", 9, "Preserved meal", 100, "2026-01-01T12:00:00.000Z", 100, 5, 20, 2, 3, 10, JSON.stringify(nutrients), "2026-01-01T12:00:00.000Z");
-
-    migrate(db);
-    expect(db.query<{ timezone: string }, [string]>("SELECT timezone FROM users WHERE id = ?").get("existing-user")?.timezone).toBe("UTC");
-    expect(db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM schema_migrations").get()?.count).toBe(5);
-    const repo = new NutritionRepository(db);
-    expect(repo.resolveIdentity("imessage", "existing-sender")).toMatchObject({ userId: "existing-user", created: false, status: "existing" });
-    expect(db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM food_logs WHERE id = 'existing-entry'").get()?.count).toBe(1);
-    expect(db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'messaging_identities'").get()).toBeNull();
-    db.close();
+  const log = (userId = alice, quantityG = 100, consumedAt = "2026-01-02T12:00:00Z") => logFood(db, foods, { userId, fdcId: 9, quantityG, consumedAt });
+  return { db, alice, bob, foods, state, log };
+}
+test("fresh schema has no migration machinery or calculated nutrient columns", () => {
+  const x = fixture();
+  expect(x.db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map(row => row.name))
+    .toEqual(["food_logs", "identities", "training_accounts", "users"]);
+  expect(x.db.query<{ name: string }, []>("PRAGMA table_info(food_logs)").all().map(row => row.name))
+    .toEqual(["id", "user_id", "fdc_id", "food_name", "quantity_g", "consumed_at", "nutrients_json"]);
+});
+test("identity resolution, labels, and linking preserve independent users", () => {
+  const x = fixture();
+  linkIdentity(x.db, x.alice, "hermex", "also-alice"); linkIdentity(x.db, x.alice, "hermex", "also-alice");
+  expect(resolveIdentity(x.db, "hermex", "also-alice")).toMatchObject({ userId: x.alice, created: false });
+  expect(() => linkIdentity(x.db, x.bob, "hermex", "also-alice")).toThrow("another user");
+  expect(resolveIdentity(x.db, "imessage", "alice", "Renamed").userId).toBe(x.alice);
+  expect(getUser(x.db, x.alice).name).toBe("Renamed");
+  expect(resolveIdentity(x.db, "imessage", "new", "Renamed").userId).not.toBe(x.alice);
+  const count = listUsers(x.db).length;
+  expect(() => resolveIdentity(x.db, "test", "invalid", " ")).toThrow("Name");
+  expect(listUsers(x.db)).toHaveLength(count);
+  expect(() => setUserName(x.db, x.alice, "x".repeat(101))).toThrow("Name");
+  expect(() => resolveIdentity(x.db, "", "sender")).toThrow("identity");
+});
+test("logging scales snapshots and separates users and local days", async () => {
+  const x = fixture(); await x.log(x.alice, 50, "2026-01-02T23:00:00-05:00");
+  const summary = dailySummary(x.db, x.alice, "2026-01-03");
+  expect(summary.totals).toMatchObject({ entry_count: 1, calories_kcal: 50, protein_g: 2.5, sodium_mg: null });
+  expect(summary.entries[0]).toMatchObject({ quantity_g: 50, consumed_at: "2026-01-03T04:00:00.000Z", calories_kcal: 50 });
+  expect(dailySummary(x.db, x.alice, "2026-01-02").totals.entry_count).toBe(0);
+  expect(dailySummary(x.db, x.bob, "2026-01-03").totals.entry_count).toBe(0);
+});
+test("missing and empty nutrient values remain null; measured zero remains zero", async () => {
+  const x = fixture();
+  expect(dailySummary(x.db, x.alice, "2026-01-02").totals).toMatchObject({ entry_count: 0, calories_kcal: null, protein_g: null });
+  x.state.calories = 0; await x.log();
+  expect(dailySummary(x.db, x.alice, "2026-01-02").totals).toMatchObject({ calories_kcal: 0, sodium_mg: null });
+  x.state.calories = 100; await x.log();
+  expect(dailySummary(x.db, x.alice, "2026-01-02").totals).toMatchObject({ calories_kcal: 100, sodium_mg: null, protein_g: 10 });
+});
+test("quantity and time edits preserve the original snapshot without another USDA call", async () => {
+  const x = fixture(), { logId } = await x.log(x.alice, 50); x.state.calories = 999;
+  expect(await updateEntry(x.db, x.foods, { userId: x.alice, entryId: logId, quantityG: 125, consumedAt: "2026-01-02T13:30:00-05:00" }))
+    .toMatchObject({ success: true, entry: { quantityG: 125, consumedAt: "2026-01-02T18:30:00.000Z", nutrients: { caloriesKcal: 125 }, nutrientsPer100g: { caloriesKcal: 100 } } });
+  expect(x.state.calls).toBe(1);
+});
+test("explicit replacement stores the selected snapshot and lookup failures preserve the entry", async () => {
+  const x = fixture(), { logId } = await x.log(x.alice, 50); x.state.calories = 240;
+  expect(await updateEntry(x.db, x.foods, { userId: x.alice, entryId: logId, fdcId: 10 }))
+    .toMatchObject({ success: true, entry: { fdcId: 10, nutrients: { caloriesKcal: 120 }, nutrientsPer100g: { caloriesKcal: 240 } } });
+  for (const mode of ["fail", "wrongId"] as const) {
+    x.state[mode] = true;
+    expect(await updateEntry(x.db, x.foods, { userId: x.alice, entryId: logId, fdcId: 11 })).toMatchObject({ success: false, error: { code: "food_lookup_failed" } });
+    x.state[mode] = false;
+  }
+  expect(dailySummary(x.db, x.alice, "2026-01-02").entries[0]).toMatchObject({ fdc_id: 10, calories_kcal: 120 });
+});
+test("edits and deletion reject other users and missing entries", async () => {
+  const x = fixture(), { logId } = await x.log();
+  expect(await updateEntry(x.db, x.foods, { userId: x.bob, entryId: logId, quantityG: 200 })).toMatchObject({ success: false, error: { code: "forbidden" } });
+  expect(deleteEntry(x.db, x.bob, logId)).toMatchObject({ success: false, error: { code: "forbidden" } });
+  expect(await updateEntry(x.db, x.foods, { userId: x.alice, entryId: "missing", quantityG: 20 })).toMatchObject({ success: false, error: { code: "not_found" } });
+  expect(deleteEntry(x.db, x.alice, logId)).toMatchObject({ success: true, entry: { id: logId, nutrients: { caloriesKcal: 100 } } });
+  expect(deleteEntry(x.db, x.alice, logId)).toMatchObject({ success: false, error: { code: "not_found" } });
+  expect(x.state.calls).toBe(1);
+});
+test("entry ownership is rechecked after an asynchronous food lookup", async () => {
+  const x = fixture(), { logId } = await x.log();
+  const foods = new FoodDataCentralClient("test", async () => {
+    deleteEntry(x.db, x.alice, logId);
+    return Response.json({ fdcId: 10, description: "Replacement", foodNutrients: [] });
   });
-
-  test("persists identity resolution across database restarts", () => {
-    const directory = mkdtempSync(join(tmpdir(), "fueld-b-identities-"));
-    const databasePath = join(directory, "nutrition.sqlite");
-    try {
-      let db = openDatabase(databasePath);
-      const first = new NutritionRepository(db).resolveIdentity("imessage", "persistent-sender");
-      db.close();
-
-      db = openDatabase(databasePath);
-      const resolved = new NutritionRepository(db).resolveIdentity("imessage", "persistent-sender");
-      expect(resolved).toMatchObject({ userId: first.userId, created: false, status: "existing" });
-      db.close();
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
-    }
-  });
-
-  test("scales nutrients by grams and isolates summaries per user and UTC day", () => {
-    const migrated = openDatabase(":memory:");
-    const repo = new NutritionRepository(migrated);
-    const user = repo.resolveIdentity("test", "user-1");
-    const other = repo.resolveIdentity("test", "user-2");
-    const fakeFoods = {
-      getFoodNutrients: async () => ({ food: { fdcId: 9, description: "Example", dataType: "Foundation", brandOwner: null }, nutrientsPer100g: nutrients, source: "test" }),
-      searchFoods: async () => [],
-    } as unknown as FoodDataCentralClient;
-    const service = new NutritionService(repo, fakeFoods);
-    return service.logFood({ userId: user.userId, fdcId: 9, quantityG: 50, consumedAt: "2026-01-02T23:00:00-05:00" })
-      .then(() => {
-        const summary = service.dailySummary(user.userId, "2026-01-03");
-        expect(summary.totals.entry_count).toBe(1);
-        expect(summary.totals.calories_kcal).toBe(50);
-        expect(summary.totals.protein_g).toBe(2.5);
-        expect(service.dailySummary(other.userId, "2026-01-03").totals.entry_count).toBe(0);
-        expect(service.dailySummary(user.userId, "2026-01-02").totals.entry_count).toBe(0);
-        migrated.close();
-      });
-  });
-
-  test("rejects impossible calendar dates", () => {
-    const db = openDatabase(":memory:");
-    const repo = new NutritionRepository(db);
-    const { userId } = repo.resolveIdentity("test", "date-user");
-    const service = new NutritionService(repo, {} as FoodDataCentralClient);
-    expect(() => service.dailySummary(userId, "2026-02-30")).toThrow("YYYY-MM-DD");
-    expect(() => service.dailySummary("00000000-0000-0000-0000-000000000000", "2026-02-28")).toThrow("User not found");
-    db.close();
-  });
-
-  test("uses each user's timezone for summaries while storing timestamps in UTC", async () => {
-    const db = openDatabase(":memory:");
-    const repo = new NutritionRepository(db);
-    const first = repo.resolveIdentity("test", "timezone-user-1");
-    const second = repo.resolveIdentity("test", "timezone-user-2");
-    const fakeFoods = {
-      getFoodNutrients: async () => ({ food: { fdcId: 9, description: "Example", dataType: "Foundation", brandOwner: null }, nutrientsPer100g: nutrients, source: "test" }),
-      searchFoods: async () => [],
-    } as unknown as FoodDataCentralClient;
-    const service = new NutritionService(repo, fakeFoods);
-
-    service.setUserTimezone(first.userId, "America/Los_Angeles");
-    expect(repo.getUserTimezone(second.userId)).toBe("UTC");
-    expect(() => service.setUserTimezone(second.userId, "Mars/Olympus_Mons")).toThrow("IANA timezone");
-    expect(() => service.setUserTimezone(second.userId, "+02:00")).toThrow("IANA timezone");
-
-    await service.logFood({ userId: first.userId, fdcId: 9, quantityG: 100, consumedAt: "2026-03-08T07:30:00Z" });
-    await service.logFood({ userId: first.userId, fdcId: 9, quantityG: 100, consumedAt: "2026-03-08T08:30:00Z" });
-    await service.logFood({ userId: second.userId, fdcId: 9, quantityG: 100, consumedAt: "2026-03-08T07:30:00Z" });
-
-    const firstUserPriorDay = service.dailySummary(first.userId, "2026-03-07");
-    const firstUserSpringDay = service.dailySummary(first.userId, "2026-03-08");
-    expect(firstUserPriorDay.timezone).toBe("America/Los_Angeles");
-    expect(firstUserPriorDay.totals.entry_count).toBe(1);
-    expect(firstUserPriorDay.entries[0].consumed_at).toBe("2026-03-08T07:30:00.000Z");
-    expect(firstUserSpringDay.totals.entry_count).toBe(1);
-    expect(service.dailySummary(second.userId, "2026-03-08").totals.entry_count).toBe(1);
-    expect(service.dailySummary(second.userId, "2026-03-07").totals.entry_count).toBe(0);
-
-    db.close();
-  });
-
-  test("shares one history across linked iMessage and Hermex identities, while isolating other users", async () => {
-    const db = openDatabase(":memory:");
-    const repo = new NutritionRepository(db);
-    const imessage = repo.resolveIdentity("imessage", "imessage-sender-1");
-    repo.linkIdentity(imessage.userId, "hermex", "hermex-sender-1");
-    const hermex = repo.resolveIdentity("hermex", "hermex-sender-1");
-    const otherUser = repo.resolveIdentity("imessage", "imessage-sender-2");
-    const fakeFoods = {
-      getFoodNutrients: async () => ({ food: { fdcId: 9, description: "Example", dataType: "Foundation", brandOwner: null }, nutrientsPer100g: nutrients, source: "test" }),
-      searchFoods: async () => [],
-    } as unknown as FoodDataCentralClient;
-    const service = new NutritionService(repo, fakeFoods);
-
-    await service.logFood({ userId: imessage.userId, fdcId: 9, quantityG: 100, consumedAt: "2026-04-10T08:00:00Z" });
-    await service.logFood({ userId: hermex.userId, fdcId: 9, quantityG: 50, consumedAt: "2026-04-10T12:00:00Z" });
-    expect(hermex.userId).toBe(imessage.userId);
-    expect(service.dailySummary(hermex.userId, "2026-04-10").totals.entry_count).toBe(2);
-    expect(service.dailySummary(otherUser.userId, "2026-04-10").totals.entry_count).toBe(0);
-    expect(service.dailySummary(hermex.userId, "2026-04-10").totals.calories_kcal).toBe(150);
-    db.close();
-  });
-
-  test("computes DST-aware local-day ranges", () => {
-    expect(utcRangeForLocalDay("2026-03-08", "America/Los_Angeles")).toEqual({
-      start: "2026-03-08T08:00:00.000Z", end: "2026-03-09T07:00:00.000Z",
-    });
-    expect(utcRangeForLocalDay("2026-11-01", "America/Los_Angeles")).toEqual({
-      start: "2026-11-01T07:00:00.000Z", end: "2026-11-02T08:00:00.000Z",
-    });
-  });
-
-  test("updates quantity and consumption time from the stored nutrient snapshot", async () => {
-    const db = openDatabase(":memory:");
-    const repo = new NutritionRepository(db);
-    const { userId } = repo.resolveIdentity("test", "update-owner");
-    const entryId = repo.logFood({
-      userId, fdcId: 9, foodName: "Original food", quantityG: 50,
-      consumedAt: "2026-01-02T12:00:00.000Z", nutrientsPer100g: nutrients,
-    });
-    let lookups = 0;
-    const foods = {
-      getFoodNutrients: async () => {
-        lookups++;
-        return { food: { fdcId: 9, description: "USDA value changed", dataType: "Foundation", brandOwner: null }, nutrientsPer100g: { ...nutrients, caloriesKcal: 999 }, source: "test" };
-      },
-      searchFoods: async () => [],
-    } as unknown as FoodDataCentralClient;
-    const service = new NutritionService(repo, foods);
-
-    const updated = await service.updateEntry({ userId, entryId, quantityG: 125, consumedAt: "2026-01-02T13:30:00-05:00" });
-    expect(updated.success).toBe(true);
-    if (!updated.success) throw new Error(updated.error.message);
-    expect(updated.entry).toMatchObject({
-      id: entryId, fdcId: 9, foodName: "Original food", quantityG: 125,
-      consumedAt: "2026-01-02T18:30:00.000Z",
-      nutrients: { caloriesKcal: 125, proteinG: 6.25 },
-      nutrientsPer100g: { caloriesKcal: 100, proteinG: 5 },
-    });
-    expect(lookups).toBe(0);
-    db.close();
-  });
-
-  test("changes food only for an explicit FDC selection and stores its nutrient snapshot", async () => {
-    const db = openDatabase(":memory:");
-    const repo = new NutritionRepository(db);
-    const { userId } = repo.resolveIdentity("test", "food-correction-owner");
-    const entryId = repo.logFood({
-      userId, fdcId: 9, foodName: "Original food", quantityG: 50,
-      consumedAt: "2026-01-02T12:00:00.000Z", nutrientsPer100g: nutrients,
-    });
-    const selectedNutrients = { ...nutrients, caloriesKcal: 240, proteinG: 12 };
-    let selectedId = 0;
-    const foods = {
-      getFoodNutrients: async (fdcId: number) => {
-        selectedId = fdcId;
-        return { food: { fdcId, description: "Explicitly selected food", dataType: "Foundation", brandOwner: null }, nutrientsPer100g: selectedNutrients, source: "test" };
-      },
-      searchFoods: async () => [],
-    } as unknown as FoodDataCentralClient;
-    const service = new NutritionService(repo, foods);
-
-    const updated = await service.updateEntry({ userId, entryId, fdcId: 10 });
-    expect(updated.success).toBe(true);
-    if (!updated.success) throw new Error(updated.error.message);
-    expect(selectedId).toBe(10);
-    expect(updated.entry).toMatchObject({
-      fdcId: 10, foodName: "Explicitly selected food", quantityG: 50,
-      nutrients: { caloriesKcal: 120, proteinG: 6 },
-      nutrientsPer100g: { caloriesKcal: 240, proteinG: 12 },
-    });
-    db.close();
-  });
-
-  test("deletes an owned entry and returns the deleted record", () => {
-    const db = openDatabase(":memory:");
-    const repo = new NutritionRepository(db);
-    const { userId } = repo.resolveIdentity("test", "delete-owner");
-    const entryId = repo.logFood({
-      userId, fdcId: 9, foodName: "Food to delete", quantityG: 75,
-      consumedAt: "2026-01-02T12:00:00.000Z", nutrientsPer100g: nutrients,
-    });
-    const service = new NutritionService(repo, {} as FoodDataCentralClient);
-
-    const deleted = service.deleteEntry(userId, entryId);
-    expect(deleted).toMatchObject({ success: true, entry: { id: entryId, userId, foodName: "Food to delete", quantityG: 75 } });
-    expect(repo.getFoodLogForUser(userId, entryId)).toMatchObject({ success: false, error: { code: "not_found" } });
-    db.close();
-  });
-
-  test("reports missing entries and prevents cross-user updates or deletion", async () => {
-    const db = openDatabase(":memory:");
-    const repo = new NutritionRepository(db);
-    const owner = repo.resolveIdentity("test", "entry-owner");
-    const other = repo.resolveIdentity("test", "entry-other");
-    const entryId = repo.logFood({
-      userId: owner.userId, fdcId: 9, foodName: "Private food", quantityG: 60,
-      consumedAt: "2026-01-02T12:00:00.000Z", nutrientsPer100g: nutrients,
-    });
-    const service = new NutritionService(repo, {} as FoodDataCentralClient);
-
-    expect(await service.updateEntry({ userId: other.userId, entryId, quantityG: 200 }))
-      .toMatchObject({ success: false, error: { code: "forbidden" } });
-    expect(service.deleteEntry(other.userId, entryId))
-      .toMatchObject({ success: false, error: { code: "forbidden" } });
-    expect(repo.getFoodLogForUser(owner.userId, entryId)).toMatchObject({
-      success: true, entry: { userId: owner.userId, foodName: "Private food", quantityG: 60 },
-    });
-    expect(await service.updateEntry({ userId: owner.userId, entryId: "missing-entry", quantityG: 20 }))
-      .toMatchObject({ success: false, error: { code: "not_found" } });
-    expect(service.deleteEntry(owner.userId, "missing-entry"))
-      .toMatchObject({ success: false, error: { code: "not_found" } });
-    db.close();
-  });
-
-  test("rejects empty and invalid entry corrections without changing the entry", async () => {
-    const db = openDatabase(":memory:");
-    const repo = new NutritionRepository(db);
-    const { userId } = repo.resolveIdentity("test", "invalid-update-owner");
-    const entryId = repo.logFood({
-      userId, fdcId: 9, foodName: "Stable food", quantityG: 60,
-      consumedAt: "2026-01-02T12:00:00.000Z", nutrientsPer100g: nutrients,
-    });
-    const service = new NutritionService(repo, {} as FoodDataCentralClient);
-
-    for (const input of [
-      { userId, entryId },
-      { userId, entryId, quantityG: 0 },
-      { userId, entryId, quantityG: Number.NaN },
-      { userId, entryId, fdcId: -1 },
-      { userId, entryId, consumedAt: "not-a-date" },
-    ]) {
-      expect(await service.updateEntry(input)).toMatchObject({ success: false, error: { code: "invalid_input" } });
-    }
-    expect(repo.getFoodLogForUser(userId, entryId)).toMatchObject({
-      success: true, entry: { foodName: "Stable food", quantityG: 60, consumedAt: "2026-01-02T12:00:00.000Z" },
-    });
-    db.close();
-  });
+  expect(await updateEntry(x.db, foods, { userId: x.alice, entryId: logId, fdcId: 10 })).toMatchObject({ success: false, error: { code: "not_found" } });
+});
+test("invalid edits, dates, and quantities leave data unchanged", async () => {
+  const x = fixture(), { logId } = await x.log();
+  for (const changes of [{}, { quantityG: 0 }, { quantityG: NaN }, { fdcId: -1 }, { consumedAt: "bad" }])
+    expect(await updateEntry(x.db, x.foods, { userId: x.alice, entryId: logId, ...changes })).toMatchObject({ success: false, error: { code: "invalid_input" } });
+  await expect(x.log(x.alice, -1)).rejects.toThrow("quantityG");
+  await expect(x.log(x.alice, 10, "bad")).rejects.toThrow("consumedAt");
+  expect(() => dailySummary(x.db, x.alice, "2026-02-30")).toThrow("YYYY-MM-DD");
+  expect(() => dailySummary(x.db, "missing", "2026-01-02")).toThrow("User not found");
+  expect(dailySummary(x.db, x.alice, "2026-01-02").entries[0]).toMatchObject({ quantity_g: 100 });
+});
+test("summaries use independent timezones and DST-aware day boundaries", async () => {
+  const x = fixture(); setUserTimezone(x.db, x.alice, "America/Los_Angeles");
+  expect(getUser(x.db, x.bob).timezone).toBe("UTC");
+  expect(() => setUserTimezone(x.db, x.bob, "Mars/Olympus_Mons")).toThrow("IANA");
+  expect(() => setUserTimezone(x.db, x.bob, "+02:00")).toThrow("IANA");
+  await x.log(x.alice, 100, "2026-03-08T07:30:00Z"); await x.log(x.alice, 100, "2026-03-08T08:30:00Z");
+  expect(dailySummary(x.db, x.alice, "2026-03-07").totals.entry_count).toBe(1);
+  expect(dailySummary(x.db, x.alice, "2026-03-08").totals.entry_count).toBe(1);
+  expect(utcRangeForLocalDay("2026-03-08", "America/Los_Angeles")).toEqual({ start: "2026-03-08T08:00:00.000Z", end: "2026-03-09T07:00:00.000Z" });
+  expect(utcRangeForLocalDay("2026-11-01", "America/Los_Angeles")).toEqual({ start: "2026-11-01T07:00:00.000Z", end: "2026-11-02T08:00:00.000Z" });
 });

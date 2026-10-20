@@ -1,4 +1,4 @@
-function localDateAt(timestamp: number, timeZone: string): string {
+export function localDateAt(timestamp: number, timeZone: string): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,
     year: "numeric",
@@ -10,8 +10,7 @@ function localDateAt(timestamp: number, timeZone: string): string {
 }
 
 function localMidnightAsUtc(date: string, timeZone: string): string {
-  const [year, month, day] = date.split("-").map(Number);
-  const target = Date.UTC(year, month - 1, day);
+  const target = Date.parse(date);
   let low = target - 36 * 60 * 60 * 1000;
   let high = target + 36 * 60 * 60 * 1000;
 
@@ -26,13 +25,19 @@ function localMidnightAsUtc(date: string, timeZone: string): string {
 }
 
 export function utcRangeForLocalDay(date: string, timeZone: string): { start: string; end: string } {
-  const [year, month, day] = date.split("-").map(Number);
-  const nextDate = new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+  const nextDate = addDays(date, 1);
   return {
     start: localMidnightAsUtc(date, timeZone),
     end: localMidnightAsUtc(nextDate, timeZone),
   };
 }
+
+export function validateDate(date: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date)) || new Date(date).toISOString().slice(0, 10) !== date)
+    throw new Error("date must use YYYY-MM-DD format");
+  return date;
+}
+export const addDays = (date: string, days: number) => new Date(Date.parse(date) + days * 86400000).toISOString().slice(0, 10);
 
 export function isValidTimeZone(timeZone: string): boolean {
   if (/^[+-]\d{2}(?::?\d{2})?$/.test(timeZone)) return false;

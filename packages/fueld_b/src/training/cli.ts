@@ -3,13 +3,10 @@ import { Writable } from "node:stream";
 import { userInfo } from "node:os";
 import type { Database } from "bun:sqlite";
 import { loadConfig } from "../config";
-import { openDatabase } from "../db/database";
-import { NutritionRepository } from "../db/repositories";
-import { createTrainingService } from "./runtime";
-import { TrainingRepository } from "./repository";
-import { connectTrainingAccount } from "./connect";
-import { credentialReader, SystemCredentialStore, type CredentialStore } from "./credentials";
-import { FinalSurgeProvider } from "./providers/final-surge";
+import { openDatabase } from "../database";
+import { listUsers, resolveIdentity, setUserName, setUserTimezone } from "../users";
+import { getAccount, connectAccount, trainingPlan } from "./plans";
+import type { Secrets } from "./secrets";
 
 export interface TrainingUI {
     ask(label: string, secret?: boolean): Promise<string>;
@@ -35,22 +32,21 @@ async function choose(ui: TrainingUI, label: string, options: string[]): Promise
     }
 }
 export async function runTrainingCommand(args: string[], db: Database, ui: TrainingUI,
-    store: CredentialStore = new SystemCredentialStore(), http: typeof fetch = fetch): Promise<void> {
+    store: Secrets = Bun.secrets, http: typeof fetch = fetch): Promise<void> {
     const [command, option] = args;
     const reauthenticate = command === "connect" && option === "--reauth";
     if (!["connect", "upcoming", "refresh"].includes(command) || (args.length !== 1 && !(args.length === 2 && reauthenticate))) {
         throw new Error("Usage: bun run training connect [--reauth] | upcoming | refresh");
     }
-    const users = new NutritionRepository(db), profiles = users.listUsers();
+    const profiles = listUsers(db);
     const firstRun = profiles.length === 0;
     if (firstRun && command !== "connect") throw new Error("No training account connected yet. Run bun run training connect");
     if (firstRun) ui.log("No profiles yet. Let's set up your local profile and connect your training account.");
-    const repository = new TrainingRepository(db);
     // Names label existing profiles; linked identities distinguish missing/duplicate names.
     const labels = profiles.map(p => {
         const identities = p.identities.map(i => `${i.platform}: ${i.externalId}`).join(", ");
         const label = p.name ? `${p.name}${identities ? ` (${identities})` : ""}` : identities || "Unnamed profile";
-        const connection = repository.findAccountForUser(p.userId);
+        const connection = getAccount(db, p.userId);
         const status = connection ? `${connection.provider === "final-surge" ? "Final Surge" : connection.provider} connected` : "no training account connected";
         return `${label} — ${status}`;
     });
@@ -58,10 +54,10 @@ export async function runTrainingCommand(args: string[], db: Database, ui: Train
     const selected = firstRun || (command !== "connect" && profiles.length === 1) ? 0 : await choose(ui, "Select an existing user", labels);
     let user = profiles[selected];
     if (command === "connect") {
-        const connected = user && repository.findAccountForUser(user.userId);
+        const connected = user && getAccount(db, user.userId);
         if (connected && !reauthenticate) {
             ui.log(`Training is already connected for ${user.name ?? "this profile"}. Using the saved login to refresh workouts…`);
-            const result = await createTrainingService(db, process.env, store, http).refreshTrainingPlan(user.userId);
+            const result = await trainingPlan(db, user.userId, "refresh", store, http);
             if (result.stale) throw new Error("Could not refresh the saved connection. Retry training refresh, or use training connect --reauth to update the login");
             ui.log(`Synced ${result.workouts.length} workouts for ${result.start} through ${result.end}.`);
             return;
@@ -76,21 +72,19 @@ export async function runTrainingCommand(args: string[], db: Database, ui: Train
         if (firstRun) {
             // Bootstrap through the same identity resolver used by nutrition.
             // Local ownership comes from the OS login, never a guessed messaging identity.
-            const resolved = users.resolveIdentity("local", userInfo().username, name);
-            if (resolved.created) users.setUserTimezone(resolved.userId, Intl.DateTimeFormat().resolvedOptions().timeZone);
-            user = users.listUsers().find(profile => profile.userId === resolved.userId)!;
+            const resolved = resolveIdentity(db, "local", userInfo().username, name);
+            if (resolved.created) setUserTimezone(db, resolved.userId, Intl.DateTimeFormat().resolvedOptions().timeZone);
+            user = listUsers(db).find(profile => profile.userId === resolved.userId)!;
         }
         ui.log("Connecting to Final Surge and synchronizing…");
-        const provider = new FinalSurgeProvider(credentialReader(store), http);
-        const result = await connectTrainingAccount(db, user.userId, { email, password }, store, provider);
-        if (!user.name) users.setUserName(user.userId, name);
+        const result = await connectAccount(db, user.userId, "final-surge", { email, password }, store, http);
+        if (!user.name) setUserName(db, user.userId, name);
         ui.log(`Connected Final Surge for ${name}.`);
         if (result.warning) ui.log(result.warning);
         if (result.sync.stale) throw new Error("Account connected, but initial synchronization failed. Run bun run training refresh to retry");
         ui.log(`Synced ${result.sync.workouts.length} workouts for ${result.sync.start} through ${result.sync.end}.`);
     } else {
-        const service = createTrainingService(db, process.env, store, http);
-        const result = await (command === "refresh" ? service.refreshTrainingPlan(user.userId) : service.getUpcomingWorkouts(user.userId));
+        const result = await trainingPlan(db, user.userId, command === "refresh" ? "refresh" : { days: 14 }, store, http);
         ui.log(JSON.stringify(result, null, 2));
         if (result.stale) throw new Error("Training refresh failed; any displayed workouts are cached and may be outdated");
     }
