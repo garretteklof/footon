@@ -1,0 +1,38 @@
+{
+  "name": "garmints",
+  "version": "0.1.0",
+  "description": "Bun-first ESM TypeScript client for Garmin Connect",
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=24"
+  },
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./exercises": {
+      "types": "./dist/types/workouts/exercises.d.ts",
+      "import": "./dist/workouts/exercises.js"
+    }
+  },
+  "files": ["dist", "README.md", "package.json"],
+  "scripts": {
+    "build": "rm -rf dist && bun build src/index.ts src/workouts/exercises.ts --outdir dist --target node --format esm && tsc -p tsconfig.build.json && printf '{\"type\":\"commonjs\"}\\n' > dist/types/package.json",
+    "test": "bun run build && bun test",
+    "test:watch": "bun run build && bun test --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests",
+    "check": "bun run typecheck && bun run lint && bun run test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/bun": "^1.4.0",
+    "@types/node": "^24.0.0",
+    "eslint": "^9.39.5",
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.70.1"
+  }
+}
