@@ -8,7 +8,7 @@ import type { WORKOUT_EXERCISE_CATEGORIES } from "../constants/workouts";
  * One of the 53 categories Garmin accepts. See `WORKOUT_EXERCISE_CATEGORIES`.
  *
  * The exercise NAMES valid within each category ship separately, in
- * `garmints/exercises` — see that module for why the two halves are validated so
+ * `@footon/garmin/exercises` — see that module for why the two halves are validated so
  * differently.
  */
 export type ExerciseCategory = (typeof WORKOUT_EXERCISE_CATEGORIES)[number];

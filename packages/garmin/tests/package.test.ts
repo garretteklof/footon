@@ -6,40 +6,48 @@ import { describe, expect, test } from "bun:test";
 
 describe("built package exports", () => {
   test("imports the package root and exercise subpath in Bun and Node", async () => {
-    const script = [
-      "import { Garmin, MemoryTokenStore, buildWorkout, WORKOUT_SPORT_TYPE_ID, WORKOUT_EXERCISE_CATEGORIES } from 'garmints';",
-      "import { EXERCISES, exercise, isExerciseName } from 'garmints/exercises';",
-      "const client = new Garmin({ tokenStore: new MemoryTokenStore() });",
-      "if (typeof client.wellness.sleep !== 'function') throw new Error('missing wellness resource');",
-      "if (WORKOUT_SPORT_TYPE_ID.RUNNING !== 1 || !WORKOUT_EXERCISE_CATEGORIES.includes('SQUAT')) throw new Error('missing workout constants');",
-      "if (exercise('SQUAT', 'BARBELL_BACK_SQUAT').name !== 'BARBELL_BACK_SQUAT') throw new Error('exercise export failed');",
-      "if (!isExerciseName('BENCH_PRESS', 'BARBELL_BENCH_PRESS') || isExerciseName('toString', 'toString')) throw new Error('exercise runtime validation failed');",
-      "if (buildWorkout('smoke', { sport: 'running' }).interval({ distance: 100 }).build().workoutSegments.length === 0) throw new Error('workout builder export failed');",
-      "if (!EXERCISES || Object.keys(EXERCISES).length === 0) throw new Error('missing exercise catalogue');",
-    ].join("\n");
+    const root = await mkdtemp(join(process.env.TMPDIR ?? tmpdir(), "garmin-consumer-"));
+    try {
+      await mkdir(join(root, "node_modules", "@footon"), { recursive: true });
+      await symlink(resolve(process.cwd()), join(root, "node_modules", "@footon", "garmin"), "dir");
+      const script = [
+        "import { Garmin, MemoryTokenStore, buildWorkout, WORKOUT_SPORT_TYPE_ID, WORKOUT_EXERCISE_CATEGORIES } from '@footon/garmin';",
+        "import { EXERCISES, exercise, isExerciseName } from '@footon/garmin/exercises';",
+        "const client = new Garmin({ tokenStore: new MemoryTokenStore() });",
+        "if (typeof client.wellness.sleep !== 'function') throw new Error('missing wellness resource');",
+        "if (WORKOUT_SPORT_TYPE_ID.RUNNING !== 1 || !WORKOUT_EXERCISE_CATEGORIES.includes('SQUAT')) throw new Error('missing workout constants');",
+        "if (exercise('SQUAT', 'BARBELL_BACK_SQUAT').name !== 'BARBELL_BACK_SQUAT') throw new Error('exercise export failed');",
+        "if (!isExerciseName('BENCH_PRESS', 'BARBELL_BENCH_PRESS') || isExerciseName('toString', 'toString')) throw new Error('exercise runtime validation failed');",
+        "if (buildWorkout('smoke', { sport: 'running' }).interval({ distance: 100 }).build().workoutSegments.length === 0) throw new Error('workout builder export failed');",
+        "if (!EXERCISES || Object.keys(EXERCISES).length === 0) throw new Error('missing exercise catalogue');",
+      ].join("\n");
 
-    for (const runtime of [Bun.which("bun"), Bun.which("node")]) {
-      if (!runtime) throw new Error("Both Bun and Node are required for package export verification");
-      const result = spawnSync(runtime, ["--input-type=module", "-e", script], { cwd: process.cwd() });
-      if (result.status !== 0) {
-        throw new Error(`${runtime} package import failed: ${result.stderr.toString()}`);
+      for (const runtime of [Bun.which("bun"), Bun.which("node")]) {
+        if (!runtime) throw new Error("Both Bun and Node are required for package export verification");
+        const result = spawnSync(runtime, ["--input-type=module", "-e", script], { cwd: root });
+        if (result.status !== 0) {
+          throw new Error(`${runtime} package import failed: ${result.stderr.toString()}`);
+        }
+        expect(result.status).toBe(0);
       }
-      expect(result.status).toBe(0);
-    }
 
-    const rootBundle = await readFile(resolve(process.cwd(), "dist/index.js"), "utf8");
-    expect(rootBundle).not.toContain("BARBELL_BACK_SQUAT");
+      const rootBundle = await readFile(resolve(process.cwd(), "dist/index.js"), "utf8");
+      expect(rootBundle).not.toContain("BARBELL_BACK_SQUAT");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   test("resolves public declarations for a strict NodeNext consumer", async () => {
     const root = await mkdtemp(join(process.env.TMPDIR ?? tmpdir(), "garmints-types-"));
     try {
       await mkdir(join(root, "node_modules"), { recursive: true });
-      await symlink(resolve(process.cwd()), join(root, "node_modules", "garmints"), "dir");
+      await mkdir(join(root, "node_modules", "@footon"), { recursive: true });
+      await symlink(resolve(process.cwd()), join(root, "node_modules", "@footon", "garmin"), "dir");
       await writeFile(join(root, "package.json"), '{"private":true,"type":"module"}\n');
       await writeFile(join(root, "consumer.mts"), [
-        'import { buildWorkout, Garmin, MemoryTokenStore, type ConnectPlusMethod, type HeartRateForDateResponse, type SocialProfile, type UserSettings, WORKOUT_SPORT_TYPE_ID } from "garmints";',
-        'import { EXERCISES, exercise } from "garmints/exercises";',
+        'import { buildWorkout, Garmin, MemoryTokenStore, type ConnectPlusMethod, type HeartRateForDateResponse, type SocialProfile, type UserSettings, WORKOUT_SPORT_TYPE_ID } from "@footon/garmin";',
+        'import { EXERCISES, exercise } from "@footon/garmin/exercises";',
         'const method: ConnectPlusMethod = "logFood";',
         'const profile: SocialProfile = { displayName: "A", userName: "a", fullName: "A", profileId: 1 };',
         'const settings: UserSettings = { userData: { measurementSystem: "metric" } };',

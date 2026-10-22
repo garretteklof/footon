@@ -1,10 +1,11 @@
-# Hermarium
+# Footon
 
-A **terrarium** of tools for Hermes.
+A monorepo of tools for Hermes.
 
 ## Packages and skills
 
 - [fueld_b](packages/fueld_b/README.md)
+- [Garmin client](packages/garmin/README.md)
 - [Nutrition skill](.agents/skills/nutrition/SKILL.md)
 - [Training skill](.agents/skills/training/SKILL.md)
 

@@ -1,14 +1,14 @@
 /**
  * Garmin exercise names, grouped by category.
  *
- * Import `garmints/exercises` to avoid loading this catalogue through the package root. It adds
+ * Import `@footon/garmin/exercises` to avoid loading this catalogue through the package root. It adds
  * about a third to the package size.
  *
  * Garmin rejects invalid categories but silently stores invalid exercise names as `""`.
  * `exercise()` checks category/name pairs at compile time. `isExerciseName()` checks runtime input.
  *
  * ```ts
- * import { exercise } from "garmints/exercises";
+ * import { exercise } from "@footon/garmin/exercises";
  *
  * exercise("SQUAT", "BARBELL_BACK_SQUAT");
  * // TypeScript rejects a name from another category.

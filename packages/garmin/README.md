@@ -6,19 +6,19 @@ Garmin does not document these Connect endpoints as a stable public API. Endpoin
 
 ## Install
 
-If your package registry hosts `garmints`, install it with Bun or npm:
+Install `@footon/garmin` with Bun or npm:
 
 ```sh
-bun add garmints
+bun add @footon/garmin
 # or
-npm install garmints
+npm install @footon/garmin
 ```
 
-For repository development, install dependencies and run the checks:
+From the workspace root, install dependencies and check the Garmin package:
 
 ```sh
 bun install
-bun run check
+bun run --filter @footon/garmin check
 ```
 
 The package exposes ESM entry points only. CommonJS `require()` is not supported.
@@ -30,7 +30,7 @@ Set `GARMIN_EMAIL` and `GARMIN_PASSWORD` in your environment. The example below 
 ```ts
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
-import { Garmin } from "garmints";
+import { Garmin } from "@footon/garmin";
 
 const email = process.env.GARMIN_EMAIL;
 const password = process.env.GARMIN_PASSWORD;
@@ -84,8 +84,8 @@ Use `garmin.request<T>(path, options)` for an authenticated request to a relativ
 After you authenticate the client, build and upload a workout:
 
 ```ts
-import { buildWorkout } from "garmints";
-import { exercise } from "garmints/exercises";
+import { buildWorkout } from "@footon/garmin";
+import { exercise } from "@footon/garmin/exercises";
 
 const workout = buildWorkout("Strength", { sport: "strength_training" })
   .interval({ reps: 8, exercise: exercise("SQUAT", "BARBELL_BACK_SQUAT") })

@@ -1,5 +1,5 @@
 {
-  "name": "garmints",
+  "name": "@footon/garmin",
   "version": "0.1.0",
   "description": "Bun-first ESM TypeScript client for Garmin Connect",
   "type": "module",

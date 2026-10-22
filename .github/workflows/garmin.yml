@@ -1,0 +1,43 @@
+name: Garmin CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/garmin/**"
+      - "packages/fueld_b/package.json"
+      - "packages/fueld_b/tsconfig.json"
+      - "packages/fueld_b/tests/garmin-workspace.test.ts"
+      - "package.json"
+      - "bun.lock"
+      - "tsconfig.json"
+      - ".github/workflows/garmin.yml"
+  pull_request:
+    paths:
+      - "packages/garmin/**"
+      - "packages/fueld_b/package.json"
+      - "packages/fueld_b/tsconfig.json"
+      - "packages/fueld_b/tests/garmin-workspace.test.ts"
+      - "package.json"
+      - "bun.lock"
+      - "tsconfig.json"
+      - ".github/workflows/garmin.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - run: bun install --frozen-lockfile
+      - run: bun run --filter @footon/garmin check
+      - run: bun run typecheck
+      - run: bun run test --test-name-pattern '^(?!.*queries live USDA endpoints)'

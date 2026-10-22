@@ -4,7 +4,7 @@ fueld_b provides nutrition and training tools to Hermes. It supports two statica
 
 ## Install and start
 
-From the Hermarium root, install dependencies:
+From the Footon root, install dependencies:
 
 ```sh
 bun install
