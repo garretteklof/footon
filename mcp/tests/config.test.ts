@@ -36,8 +36,8 @@ describe("static JSON configuration", () => {
 
   test("uses fixed herm.sqlite outside src and creates private database files", () => {
     const packageRoot = fileURLToPath(new URL("../", import.meta.url));
-    const legacyDataPath = join(packageRoot, "..", "fueld_b", "data", "herm.sqlite");
-    expect(databasePath).toBe(legacyDataPath);
+    const expectedDataPath = join(packageRoot, "data", "herm.sqlite");
+    expect(databasePath).toBe(expectedDataPath);
     expect(relative(join(packageRoot, "src"), databasePath).startsWith("..")).toBe(true);
     const directory = mkdtempSync(join(tmpdir(), "footon-mcp-test-"));
     const path = join(directory, "data", "herm.sqlite");

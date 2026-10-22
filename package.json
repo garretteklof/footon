@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "mcp"
   ],
   "scripts": {
     "start:mcp": "bun run --filter @footon/fuel build && bun run --filter @footon/blocks build && bun run --filter @footon/mcp start",

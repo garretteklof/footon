@@ -14,7 +14,7 @@ if (!config.fdcApiKey) {
 
 const db = openDatabase();
 const foods = new FoodDataCentralClient(config.fdcApiKey);
-const server = new McpServer({ name: "fueld_b", version: "0.1.0" });
+const server = new McpServer({ name: "footon", version: "0.1.0" });
 
 async function result(work: () => unknown) {
   try {
@@ -112,4 +112,4 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     db.close();
   });
 }
-console.error(`fueld_b MCP server running over stdio; SQLite: ${databasePath}`);
+console.error(`Footon MCP server running over stdio; SQLite: ${databasePath}`);

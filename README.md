@@ -7,7 +7,7 @@ Bun monorepo for independent nutrition and training services, composed by a loca
 - [Garmin client](packages/garmin/README.md)
 - [Fuel](packages/fuel/README.md) — nutrition, FoodData Central, and food logs.
 - [Blocks](packages/blocks/README.md) — training plans and Final Surge.
-- [MCP application](packages/mcp/README.md) — trusted local composition for Hermes.
+- [MCP application](mcp/README.md) — trusted local composition for Hermes.
 - [Nutrition skill](.agents/skills/nutrition/SKILL.md)
 - [Training skill](.agents/skills/training/SKILL.md)
 

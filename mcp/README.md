@@ -4,10 +4,10 @@ The local stdio MCP application used by Hermes. It composes `@footon/fuel` and `
 
 Run it from the repository root with `bun run start:mcp`. The legacy `bun run start:fueld_b` command remains as an alias for existing Hermes configuration.
 
-Configuration and SQLite locations remain compatible with existing setups:
+Configuration and SQLite locations are local to the monorepo:
 
-- Keep `config.local.json` at `packages/fueld_b/config.local.json`. It must contain `fdcApiKey` and exactly two entries in `users`. Each user needs `name`, `phone`, and an IANA `timezone`; `training` credentials remain optional. The file contains credentials and must not be committed. The server sets it to owner-only permissions at startup.
-- The server keeps using `packages/fueld_b/data/herm.sqlite`. This preserves the existing location and SQLite schema. The old directory remains only for local configuration, local data, and ignore rules; it is not a workspace package.
+- The server reads `packages/fuel/config.local.json`; it must contain `fdcApiKey` and exactly two entries in `users`. Each user needs `name`, `phone`, and an IANA `timezone`; `training` credentials remain optional. The file contains credentials and must not be committed. The server sets it to owner-only permissions at startup. The duplicate `packages/blocks/config.local.json` is not read by the server.
+- The server stores SQLite at `mcp/data/herm.sqlite` and creates the directory/file on startup. Fuel owns `food_logs`; Blocks owns `training_accounts`. Both tables use the same database file.
 
 The server keeps its existing tool names, trusted BlueBubbles sender metadata key, owner checks, and stdio transport. Run it only as a local child of the trusted Hermes host.
 

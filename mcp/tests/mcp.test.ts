@@ -9,15 +9,15 @@ const localDateAt = (timestamp: number, timeZone: string) =>
   Temporal.Instant.fromEpochMilliseconds(timestamp).toZonedDateTimeISO(timeZone).toPlainDate().toString();
 
 async function host() {
-  const directory = mkdtempSync(join(tmpdir(), "fueld-mcp-"));
+  const directory = mkdtempSync(join(tmpdir(), "footon-mcp-"));
   const packageRoot = fileURLToPath(new URL("../", import.meta.url));
-  const runtimeRoot = join(directory, "packages", "mcp");
-  const legacyRoot = join(directory, "packages", "fueld_b");
-  const databasePath = join(legacyRoot, "data", "herm.sqlite");
+  const runtimeRoot = join(directory, "mcp");
+  const fuelRoot = join(directory, "packages", "fuel");
+  const databasePath = join(runtimeRoot, "data", "herm.sqlite");
   cpSync(join(packageRoot, "src"), join(runtimeRoot, "src"), { recursive: true });
   symlinkSync(join(packageRoot, "node_modules"), join(runtimeRoot, "node_modules"), "dir");
-  mkdirSync(join(legacyRoot, "data"), { recursive: true });
-  const configPath = join(legacyRoot, "config.local.json");
+  mkdirSync(fuelRoot, { recursive: true });
+  const configPath = join(fuelRoot, "config.local.json");
   writeFileSync(configPath, JSON.stringify({ fdcApiKey: "test-key", users: {
     alex: { name: "Alex", phone: "+15551234567", timezone: "America/Chicago", training: { provider: "final-surge", email: "alex@example.test", password: "test-secret-one" } },
     sam: { name: "Sam", phone: "+15559876543", timezone: "America/Los_Angeles", training: { provider: "final-surge", email: "sam@example.test", password: "test-secret-two" } },

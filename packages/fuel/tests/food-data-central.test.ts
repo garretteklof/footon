@@ -3,8 +3,9 @@ import { readFileSync } from "node:fs";
 import { FoodDataCentralClient } from "../src/food-data-central";
 
 const fdcApiKey = (() => {
+  if (process.env.FOOD_DATA_CENTRAL_LIVE_TEST !== "1") return "";
   try {
-    const value: unknown = JSON.parse(readFileSync(new URL("../../fueld_b/config.local.json", import.meta.url), "utf8"));
+    const value: unknown = JSON.parse(readFileSync(new URL("../config.local.json", import.meta.url), "utf8"));
     return typeof value === "object" && value !== null && "fdcApiKey" in value && typeof value.fdcApiKey === "string"
       ? value.fdcApiKey
       : "";

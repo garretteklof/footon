@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { initializeSchema as initializeFuelSchema } from "@footon/fuel";
 import { initializeSchema as initializeBlocksSchema } from "@footon/blocks";
 
-export const databasePath = join(fileURLToPath(new URL("../../fueld_b/data", import.meta.url)), "herm.sqlite");
+export const databasePath = join(fileURLToPath(new URL("../data", import.meta.url)), "herm.sqlite");
 
 export function openDatabase(path = databasePath): Database {
   if (path !== ":memory:") {

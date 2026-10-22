@@ -8,6 +8,24 @@
         "@footon/garmin": "workspace:*",
       },
     },
+    "mcp": {
+      "name": "@footon/mcp",
+      "version": "0.1.0",
+      "dependencies": {
+        "@footon/blocks": "workspace:*",
+        "@footon/fuel": "workspace:*",
+        "@modelcontextprotocol/server": "^2.0.0",
+        "zod": "^4.0.0",
+      },
+      "devDependencies": {
+        "@eslint/js": "^9.39.5",
+        "@types/bun": "^1.4.0",
+        "@types/node": "^24.0.0",
+        "eslint": "^9.39.5",
+        "typescript": "^6.0.0",
+        "typescript-eslint": "^8.70.1",
+      },
+    },
     "packages/blocks": {
       "name": "@footon/blocks",
       "version": "0.1.0",
@@ -44,24 +62,6 @@
         "typescript-eslint": "^8.70.1",
       },
     },
-    "packages/mcp": {
-      "name": "@footon/mcp",
-      "version": "0.1.0",
-      "dependencies": {
-        "@footon/blocks": "workspace:*",
-        "@footon/fuel": "workspace:*",
-        "@modelcontextprotocol/server": "^2.0.0",
-        "zod": "^4.0.0",
-      },
-      "devDependencies": {
-        "@eslint/js": "^9.39.5",
-        "@types/bun": "^1.4.0",
-        "@types/node": "^24.0.0",
-        "eslint": "^9.39.5",
-        "typescript": "^6.0.0",
-        "typescript-eslint": "^8.70.1",
-      },
-    },
   },
   "packages": {
     "@eslint-community/eslint-utils": ["@eslint-community/eslint-utils@4.10.1", "", { "dependencies": { "eslint-visitor-keys": "^3.4.3" }, "peerDependencies": { "eslint": "^6.0.0 || ^7.0.0 || >=8.0.0" } }, "sha512-cuadcxVFE8sDK6iWJbs8Sn0av2Nrh2QSGQhVlBW9AaAHqHwjWsZHT8LJ4hFGPh7ASBV2deFdM7H/DPjulmh8rg=="],
@@ -88,7 +88,7 @@
 
     "@footon/garmin": ["@footon/garmin@workspace:packages/garmin"],
 
-    "@footon/mcp": ["@footon/mcp@workspace:packages/mcp"],
+    "@footon/mcp": ["@footon/mcp@workspace:mcp"],
 
     "@humanfs/core": ["@humanfs/core@0.19.2", "", { "dependencies": { "@humanfs/types": "^0.15.0" } }, "sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA=="],
 
