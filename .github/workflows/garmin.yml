@@ -1,13 +1,14 @@
-name: Garmin CI
+name: Workspace CI
 
 on:
   push:
     branches: [main]
     paths:
       - "packages/garmin/**"
-      - "packages/fueld_b/package.json"
-      - "packages/fueld_b/tsconfig.json"
-      - "packages/fueld_b/tests/garmin-workspace.test.ts"
+      - "packages/fuel/**"
+      - "packages/blocks/**"
+      - "packages/mcp/**"
+      - "tests/garmin-workspace.test.ts"
       - "package.json"
       - "bun.lock"
       - "tsconfig.json"
@@ -15,9 +16,10 @@ on:
   pull_request:
     paths:
       - "packages/garmin/**"
-      - "packages/fueld_b/package.json"
-      - "packages/fueld_b/tsconfig.json"
-      - "packages/fueld_b/tests/garmin-workspace.test.ts"
+      - "packages/fuel/**"
+      - "packages/blocks/**"
+      - "packages/mcp/**"
+      - "tests/garmin-workspace.test.ts"
       - "package.json"
       - "bun.lock"
       - "tsconfig.json"
@@ -39,5 +41,8 @@ jobs:
           bun-version: 1.4.3
       - run: bun install --frozen-lockfile
       - run: bun run --filter @footon/garmin check
+      - run: bun run --filter @footon/fuel lint
+      - run: bun run --filter @footon/blocks lint
+      - run: bun run --filter @footon/mcp lint
       - run: bun run typecheck
-      - run: bun run test --test-name-pattern '^(?!.*queries live USDA endpoints)'
+      - run: bun run test
