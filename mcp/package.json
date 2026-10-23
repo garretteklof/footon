@@ -9,7 +9,7 @@
     "dev": "bun --watch src/index.ts",
     "test": "bun run --filter @footon/fuel build && bun run --filter @footon/blocks build && bun test",
     "typecheck": "bun run --filter @footon/fuel build && bun run --filter @footon/blocks build && tsc --noEmit",
-    "lint": "eslint src tests",
+    "lint": "bun run --filter @footon/fuel build && bun run --filter @footon/blocks build && eslint src tests",
     "check": "bun run typecheck && bun run lint && bun run test"
   },
   "dependencies": {
