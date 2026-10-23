@@ -4,7 +4,7 @@ import * as z from "zod/v4";
 import { normalizePhone } from "./utils/phone";
 import { isValidTimeZone } from "./utils/time";
 
-const configPath = fileURLToPath(new URL("../../packages/fuel/config.local.json", import.meta.url));
+const configPath = fileURLToPath(new URL("../../config.local.json", import.meta.url));
 const trainingSchema = z.object({
   provider: z.literal("final-surge"),
   email: z.string().trim().min(1),
@@ -48,7 +48,7 @@ export function loadConfig() {
     chmodSync(configPath, 0o600);
     contents = readFileSync(configPath, "utf8");
   } catch {
-    throw new Error("Create packages/fuel/config.local.json");
+    throw new Error("Create config.local.json at the Footon repository root");
   }
 
   try {

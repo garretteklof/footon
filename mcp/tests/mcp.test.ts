@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
-import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { openDatabase } from "../src/database";
+import { openStorage, migrateStorage } from "@footon/storage";
 
 const localDateAt = (timestamp: number, timeZone: string) =>
   Temporal.Instant.fromEpochMilliseconds(timestamp).toZonedDateTimeISO(timeZone).toPlainDate().toString();
@@ -12,18 +12,18 @@ async function host() {
   const directory = mkdtempSync(join(tmpdir(), "footon-mcp-"));
   const packageRoot = fileURLToPath(new URL("../", import.meta.url));
   const runtimeRoot = join(directory, "mcp");
-  const fuelRoot = join(directory, "packages", "fuel");
-  const databasePath = join(runtimeRoot, "data", "herm.sqlite");
+  const databasePath = join(directory, "foot.sqlite");
+  const configPath = join(directory, "config.local.json");
   cpSync(join(packageRoot, "src"), join(runtimeRoot, "src"), { recursive: true });
   symlinkSync(join(packageRoot, "node_modules"), join(runtimeRoot, "node_modules"), "dir");
-  mkdirSync(fuelRoot, { recursive: true });
-  const configPath = join(fuelRoot, "config.local.json");
-  writeFileSync(configPath, JSON.stringify({ fdcApiKey: "test-key", users: {
+  writeFileSync(configPath, JSON.stringify({ fdcApiKey: "offline-test-key", users: {
     alex: { name: "Alex", phone: "+15551234567", timezone: "America/Chicago", training: { provider: "final-surge", email: "alex@example.test", password: "test-secret-one" } },
     sam: { name: "Sam", phone: "+15559876543", timezone: "America/Los_Angeles", training: { provider: "final-surge", email: "sam@example.test", password: "test-secret-two" } },
   } }));
+  migrateStorage(databasePath);
   const child = Bun.spawn([process.execPath, "src/index.ts"], {
     cwd: runtimeRoot, stdin: "pipe", stdout: "pipe", stderr: "pipe",
+    env: { ...process.env, FOOTON_DB_PATH: databasePath },
   });
   const pending = new Map<number, (value: any) => void>();
   let sequence = 0, buffer = "";
@@ -66,9 +66,9 @@ test("full MCP resolves only trusted senders and enforces per-user nutrition own
     const tools = (await h.rpc("tools/list", {})).tools.map((tool: any) => tool.name);
     expect((await import("node:fs")).statSync(h.configPath).mode & 0o777).toBe(0o600);
     expect(tools.sort()).toEqual(["search_foods", "get_food_nutrients", "log_food", "update_entry", "delete_entry", "daily_nutrition_summary", "getWeeklyTrainingPlan", "getUpcomingWorkouts", "getWorkoutForDate", "refreshTrainingPlan"].sort());
-    const db = openDatabase(h.databasePath), entryId = crypto.randomUUID();
-    db.query("INSERT INTO food_logs VALUES (?,?,?,?,?,?,?)").run(entryId, "alex", 9, "Apple", 100, "2026-10-20T15:00:00.000Z", JSON.stringify({ caloriesKcal: 100, proteinG: 5, carbohydratesG: 20, fatG: 1, fiberG: 3, sodiumMg: 0 }));
-    db.close();
+    const storage = openStorage(h.databasePath), entryId = crypto.randomUUID();
+    storage.sqlite.query("INSERT INTO food_logs VALUES (?,?,?,?,?,?,?)").run(entryId, "alex", 9, "Apple", 100, "2026-10-20T15:00:00.000Z", JSON.stringify({ caloriesKcal: 100, proteinG: 5, carbohydratesG: 20, fatG: 1, fiberG: 3, sodiumMg: 0 }));
+    storage.close();
     expect((await h.call("daily_nutrition_summary", { date: "2026-10-20" }, "+15551234567")).content[0].text).toContain('"entry_count": 1');
     expect(value(await h.call("daily_nutrition_summary", { date: "2026-10-20" }, "+15559876543"))).toMatchObject({ timezone: "America/Los_Angeles", totals: { entry_count: 0 }, entries: [] });
     expect((await h.call("daily_nutrition_summary", { date: "2026-10-20" })).isError).toBe(true);
@@ -76,22 +76,23 @@ test("full MCP resolves only trusted senders and enforces per-user nutrition own
     expect(value(await h.call("delete_entry", { entryId }, "+15559876543"))).toMatchObject({ success: false, error: { code: "forbidden" } });
     expect(value(await h.call("delete_entry", { entryId }, "+15551234567"))).toMatchObject({ success: true });
     expect((await h.call("daily_nutrition_summary", { date: "2026-10-20" }, "+15550000000")).isError).toBe(true);
-    const db2 = openDatabase(h.databasePath);
-    expect(db2.query("SELECT name FROM sqlite_master WHERE type='table' AND name='users'").get()).toBeNull();
-    expect(db2.query("SELECT count(*) AS count FROM food_logs WHERE user_id='unknown'").get()).toEqual({ count: 0 });
-    db2.close();
+    const verified = openStorage(h.databasePath);
+    expect(verified.sqlite.query("SELECT count(*) AS count FROM users").get()).toEqual({ count: 2 });
+    expect(verified.sqlite.query("SELECT count(*) AS count FROM food_logs WHERE user_id='unknown'").get()).toEqual({ count: 0 });
+    verified.close();
   } finally { await h.close(); }
 }, 10000);
 test("training results are resolved and scoped to the trusted sender", async () => {
   const h = await host();
   try {
-    const db = openDatabase(h.databasePath);
+    const storage = openStorage(h.databasePath);
     const now = new Date().toISOString();
     const snapshot = (name: string, timezone: string) => JSON.stringify([{ date: localDateAt(Date.now(), timezone), name, description: null, status: "planned", isRace: null, activities: [] }]);
     for (const [id, name, timezone] of [["alex", "Alex private plan", "America/Chicago"], ["sam", "Sam private plan", "America/Los_Angeles"]])
-      db.query("INSERT INTO training_accounts (user_id, snapshot_json, start_date, end_date, synced_at) VALUES (?, ?, '2000-01-01', '2099-12-31', ?)")
-        .run(id, snapshot(name, timezone), now);
-    db.close();
+      storage.sqlite.query(`INSERT INTO training_accounts (user_id, provider, account_id, credential_ref, snapshot_json, start_date, end_date, synced_at, refresh_version)
+        VALUES (?, 'final-surge', ?, ?, ?, '2000-01-01', '2099-12-31', ?, 0)`)
+        .run(id, `cached-${id}`, id, snapshot(name, timezone), now);
+    storage.close();
     const value = (result: any) => JSON.parse(result.content[0].text);
     expect(value(await h.call("getWeeklyTrainingPlan", {}, "+15551234567")).workouts[0].name).toBe("Alex private plan");
     expect(value(await h.call("getWeeklyTrainingPlan", {}, "+15559876543")).workouts[0].name).toBe("Sam private plan");

@@ -11,7 +11,10 @@
     "dev:mcp": "bun run --filter @footon/fuel build && bun run --filter @footon/blocks build && bun run --filter @footon/mcp dev",
     "start:fueld_b": "bun run start:mcp",
     "dev:fueld_b": "bun run dev:mcp",
-    "test": "bun run --filter '*' test && bun test tests/garmin-workspace.test.ts",
+    "db:generate": "bun run --filter @footon/storage db:generate",
+    "db:baseline": "bun run --filter @footon/storage db:baseline",
+    "db:migrate": "bun run --filter @footon/storage db:migrate",
+    "test": "bun run --filter @footon/storage test && bun run --filter @footon/garmin test && bun run --filter @footon/fuel test && bun run --filter @footon/blocks test && bun run --filter @footon/mcp test && bun test tests/garmin-workspace.test.ts",
     "typecheck": "bun run --filter '*' typecheck"
   },
   "devDependencies": {

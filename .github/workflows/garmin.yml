@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "packages/garmin/**"
+      - "packages/storage/**"
       - "packages/fuel/**"
       - "packages/blocks/**"
       - "mcp/**"
@@ -16,6 +17,7 @@ on:
   pull_request:
     paths:
       - "packages/garmin/**"
+      - "packages/storage/**"
       - "packages/fuel/**"
       - "packages/blocks/**"
       - "mcp/**"
@@ -41,6 +43,7 @@ jobs:
           bun-version: 1.4.3
       - run: bun install --frozen-lockfile
       - run: bun run --filter @footon/garmin check
+      - run: bun run --filter @footon/storage lint
       - run: bun run --filter @footon/fuel lint
       - run: bun run --filter @footon/blocks lint
       - run: bun run --filter @footon/mcp lint

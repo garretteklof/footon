@@ -32,7 +32,7 @@ test("cache TTL, explicit refresh, and stale fallback preserve the last successf
   const x = fixture(); await x.plan();
   expect(x.state.ranges[0]).toEqual(["2026-10-19", "2026-11-01"]);
   await x.plan(x.aliceUser, "week"); expect(x.state.ranges).toHaveLength(1);
-  x.db.query("UPDATE training_accounts SET synced_at=? WHERE user_id=?").run("2026-10-20T11:00:00Z", x.alice);
+  x.sqlite.query("UPDATE training_accounts SET synced_at=? WHERE user_id=?").run("2026-10-20T11:00:00Z", x.alice);
   await x.plan(x.aliceUser, "week"); expect(x.state.ranges).toHaveLength(2);
   const syncedAt = getAccount(x.db, x.alice)!.syncedAt; x.state.unavailable = true;
   const stale = await x.plan(x.aliceUser, "refresh");
@@ -71,7 +71,7 @@ test("the same Final Surge account cannot be assigned to both users", async () =
   const x = fixture(); await x.plan();
   const duplicate = { ...x.bobUser, training: x.aliceUser.training! };
   await expect(x.plan(duplicate, "refresh")).rejects.toThrow("another user");
-  expect(getAccount(x.db, x.bob)!.snapshot).toBeNull();
+  expect(getAccount(x.db, x.bob)).toBeUndefined();
 });
 
 test("Final Surge retries expired sessions once and applies rate-limit cooldowns", async () => {
@@ -105,13 +105,13 @@ test("SQLite refresh ordering prevents older responses replacing newer snapshots
     const http = (async (_url: unknown) => new Promise<Response>(resolve => releases.push(resolve))) as typeof fetch;
     const older = trainingPlan(x.db, x.aliceUser, "refresh", http);
     while (releases.length < 1) await Bun.sleep(1);
-    const newer = trainingPlan(other, x.aliceUser, "refresh", http);
+    const newer = trainingPlan(other.db, x.aliceUser, "refresh", http);
     while (releases.length < 2) await Bun.sleep(1);
     releases[1](Response.json({ data: [{ workout_date: "2026-10-21", name: "New" }] }));
     await newer;
     releases[0](Response.json({ data: [{ workout_date: "2026-10-21", name: "Old" }] }));
     expect((await older).workouts[0].name).toBe("New");
-    expect(JSON.parse(getAccount(other, x.alice)!.snapshot!)[0].name).toBe("New");
+    expect(JSON.parse(getAccount(other.db, x.alice)!.snapshot!)[0].name).toBe("New");
   } finally { other.close(); closeFixtures(); rmSync(directory, { recursive: true, force: true }); }
 });
 
@@ -119,5 +119,5 @@ test("users without a training provider get a clear error and no cache row", asy
   const x = fixture();
   const user = { ...x.aliceUser, training: undefined };
   await expect(x.plan(user, "week")).rejects.toThrow("Training provider not configured");
-  expect(getAccount(x.db, user.id)).toBeNull();
+  expect(getAccount(x.db, user.id)).toBeUndefined();
 });

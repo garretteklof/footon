@@ -1,18 +1,21 @@
 import { afterEach, expect, test } from "bun:test";
-import { Database } from "bun:sqlite";
+import { migrateDatabase, openStorage, upsertUsers, type StorageConnection } from "@footon/storage";
 import { logFood, updateEntry, deleteEntry, dailySummary } from "../src/nutrition";
 import { FoodDataCentralClient } from "../src/food-data-central";
 import { utcRangeForLocalDay } from "../src/time";
-import { initializeSchema } from "../src/schema";
 
-const databases: Database[] = [];
-afterEach(() => { for (const db of databases.splice(0)) db.close(); });
+const databases: StorageConnection[] = [];
+afterEach(() => { for (const storage of databases.splice(0)) storage.close(); });
 function fixture() {
-  const db = new Database(":memory:"); initializeSchema(db); databases.push(db);
+  const storage = openStorage(":memory:");
+  migrateDatabase(storage.db);
+  databases.push(storage);
   const users = [
-    { id: "user-1", name: "Alice", phone: "+15551234567", timezone: "America/Los_Angeles", training: { provider: "final-surge", email: "a", password: "pw" } },
-    { id: "user-2", name: "Bob", phone: "+15559876543", timezone: "UTC", training: { provider: "final-surge", email: "b", password: "pw" } },
+    { id: "user-1", name: "Alice", phone: "+12125550101", timezone: "America/Los_Angeles", training: { provider: "final-surge", email: "a", password: "pw" } },
+    { id: "user-2", name: "Bob", phone: "+14155550102", timezone: "UTC", training: { provider: "final-surge", email: "b", password: "pw" } },
   ];
+  upsertUsers(storage.db, users);
+  const db = storage.db;
   const alice = users[0].id, bob = users[1].id;
   const state = { calls: 0, calories: 100, fail: false, wrongId: false };
   const foods = new FoodDataCentralClient("test", async url => {
@@ -23,18 +26,19 @@ function fixture() {
     ] });
   });
   const log = (userId = alice, quantityG = 100, consumedAt = "2026-01-02T12:00:00Z") => logFood(db, foods, { userId, fdcId: 9, quantityG, consumedAt });
-  return { db, alice, bob, foods, state, log, users };
+  return { db, sqlite: storage.sqlite, alice, bob, foods, state, log, users };
 }
-test("fresh schema contains only data tables and no calculated nutrient columns", () => {
+test("Fuel's table keeps the nutrition columns and avoids calculated nutrient columns", () => {
   const x = fixture();
-  expect(x.db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map(row => row.name))
-    .toEqual(["food_logs"]);
-  expect(x.db.query<{ name: string }, []>("PRAGMA table_info(food_logs)").all().map(row => row.name))
+  expect(x.sqlite.query<{ name: string }, []>("PRAGMA table_info(food_logs)").all().map(row => row.name))
     .toEqual(["id", "user_id", "fdc_id", "food_name", "quantity_g", "consumed_at", "nutrients_json"]);
 });
-test("user data uses stable configured IDs without a users table", () => {
+test("configured users live in shared storage and use stable IDs", () => {
   const x = fixture();
-  expect(x.db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='users'").get()).toBeNull();
+  expect(x.sqlite.query("SELECT id, display_name FROM users ORDER BY id").all()).toEqual([
+    { id: "user-1", display_name: "Alice" },
+    { id: "user-2", display_name: "Bob" },
+  ]);
 });
 test("logging scales snapshots and separates users and local days", async () => {
   const x = fixture(); await x.log(x.alice, 50, "2026-01-02T23:00:00-05:00");

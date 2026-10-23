@@ -3,7 +3,7 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import * as z from "zod/v4";
 import { loadConfig } from "./config";
 import { resolveTrustedSender } from "./identity";
-import { databasePath, openDatabase } from "./database";
+import { openStorage, upsertUsers } from "@footon/storage";
 import { FoodDataCentralClient, dailySummary, deleteEntry, logFood, updateEntry } from "@footon/fuel";
 import { trainingPlan } from "@footon/blocks";
 
@@ -12,7 +12,9 @@ if (!config.fdcApiKey) {
   throw new Error("fdcApiKey is required in config.local.json. See README.md.");
 }
 
-const db = openDatabase();
+const storage = openStorage();
+upsertUsers(storage.db, config.users);
+const db = storage.db;
 const foods = new FoodDataCentralClient(config.fdcApiKey);
 const server = new McpServer({ name: "footon", version: "0.1.0" });
 
@@ -109,7 +111,7 @@ const handle = serveStdio(() => server);
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     void handle.close();
-    db.close();
+    storage.close();
   });
 }
-console.error(`Footon MCP server running over stdio; SQLite: ${databasePath}`);
+console.error(`Footon MCP server running over stdio; SQLite: ${storage.path}`);

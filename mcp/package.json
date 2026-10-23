@@ -15,6 +15,7 @@
   "dependencies": {
     "@footon/blocks": "workspace:*",
     "@footon/fuel": "workspace:*",
+    "@footon/storage": "workspace:*",
     "@modelcontextprotocol/server": "^2.0.0",
     "zod": "^4.0.0"
   },
