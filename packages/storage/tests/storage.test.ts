@@ -58,6 +58,9 @@ test("Drizzle migrates an isolated in-memory database with shared tables and saf
     upsertUsers(storage.db, [{ id: "test-user", name: "Test User", timezone: "UTC" }]);
     expect(storage.sqlite.query("SELECT id, display_name FROM users").get()).toEqual({ id: "test-user", display_name: "Test User" });
     expect(storage.sqlite.query("SELECT name FROM sqlite_master WHERE type='table' AND name='training_refresh_state'").get()).not.toBeNull();
+    for (const table of ["vitals_observations", "athlete_profiles", "completed_activities"]) {
+      expect(storage.sqlite.query("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(table)).toEqual({ name: table });
+    }
   } finally {
     storage.close();
   }
@@ -105,9 +108,30 @@ test("baseline stamps an existing schema then applies only later migrations", ()
   const migrated = openStorage(path);
   try {
     const migrationCount = migrated.sqlite.query<{ count: number }, []>("SELECT count(*) AS count FROM __drizzle_migrations").get()?.count;
-    expect(migrationCount).toBe(2);
+    expect(migrationCount).toBe(4);
     for (const table of ["users", "identities", "food_logs", "training_accounts"]) {
       expect(migrated.sqlite.query<{ count: number }, []>(`SELECT count(*) AS count FROM ${table}`).get()?.count).toBe(1);
+    }
+    expect(migrated.sqlite.query("SELECT id, display_name FROM users WHERE id='legacy-user'").get())
+      .toEqual({ id: "legacy-user", display_name: "Legacy User" });
+    expect(migrated.sqlite.query("SELECT id, food_name, quantity_g FROM food_logs WHERE id='legacy-entry'").get())
+      .toEqual({ id: "legacy-entry", food_name: "Apple", quantity_g: 50 });
+    for (const table of ["vitals_observations", "athlete_profiles", "completed_activities"]) {
+      expect(migrated.sqlite.query<{ count: number }, []>(`SELECT count(*) AS count FROM ${table}`).get()?.count).toBe(0);
+    }
+    const indexes = [
+      "vitals_observations_user_metric_date",
+      "vitals_observations_user_time",
+      "vitals_observations_source_key",
+      "completed_activities_user_date",
+      "completed_activities_source_key",
+    ];
+    for (const name of indexes) {
+      expect(migrated.sqlite.query("SELECT name FROM sqlite_master WHERE type='index' AND name=?").get(name)).toEqual({ name });
+    }
+    for (const table of ["vitals_observations", "athlete_profiles", "completed_activities"]) {
+      const foreignKeys = migrated.sqlite.query<{ table: string; from: string; to: string }, []>(`PRAGMA foreign_key_list(${table})`).all();
+      expect(foreignKeys).toContainEqual(expect.objectContaining({ table: "users", from: "user_id", to: "id" }));
     }
     expect(migrated.sqlite.query("SELECT name FROM sqlite_master WHERE type='table' AND name='training_refresh_state'").get()).not.toBeNull();
     expect(migrated.sqlite.query("PRAGMA integrity_check").get()).toEqual({ integrity_check: "ok" });

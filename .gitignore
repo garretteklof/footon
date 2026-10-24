@@ -12,3 +12,5 @@ packages/storage/db/*.sqlite*
 *.log
 .DS_Store
 dist
+.superpowers
+docs

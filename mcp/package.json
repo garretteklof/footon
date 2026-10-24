@@ -2,20 +2,21 @@
   "name": "@footon/mcp",
   "version": "0.1.0",
   "private": true,
-  "description": "Hermes stdio MCP application composing Footon nutrition and training tools",
+  "description": "Hermes stdio MCP application composing Footon nutrition, training, and vitals tools",
   "type": "module",
   "scripts": {
-    "start": "bun src/index.ts",
-    "dev": "bun --watch src/index.ts",
-    "test": "bun run --filter @footon/fuel build && bun run --filter @footon/blocks build && bun test",
-    "typecheck": "bun run --filter @footon/fuel build && bun run --filter @footon/blocks build && tsc --noEmit",
-    "lint": "bun run --filter @footon/fuel build && bun run --filter @footon/blocks build && eslint src tests",
+    "start": "bun run --filter @footon/vitals build && bun src/index.ts",
+    "dev": "bun run --filter @footon/vitals build && bun --watch src/index.ts",
+    "test": "bun run --filter @footon/fuel build && bun run --filter @footon/blocks build && bun run --filter @footon/vitals build && bun test",
+    "typecheck": "bun run --filter @footon/fuel build && bun run --filter @footon/blocks build && bun run --filter @footon/vitals build && tsc --noEmit",
+    "lint": "bun run --filter @footon/fuel build && bun run --filter @footon/blocks build && bun run --filter @footon/vitals build && eslint src tests",
     "check": "bun run typecheck && bun run lint && bun run test"
   },
   "dependencies": {
     "@footon/blocks": "workspace:*",
     "@footon/fuel": "workspace:*",
     "@footon/storage": "workspace:*",
+    "@footon/vitals": "workspace:*",
     "@modelcontextprotocol/server": "^2.0.0",
     "zod": "^4.0.0"
   },

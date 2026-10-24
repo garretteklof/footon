@@ -8,6 +8,8 @@ export default defineConfig({
     "../fuel/src/db/schema.ts",
     "../blocks/src/db/schema.ts",
     "../blocks/src/db/refresh-schema.ts",
+    "../blocks/src/db/athlete-schema.ts",
+    "../vitals/src/db/schema.ts",
     "./src/schema.ts",
   ],
   out: "./drizzle",

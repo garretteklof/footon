@@ -6,6 +6,7 @@ import { resolveTrustedSender } from "./identity";
 import { openStorage, upsertUsers } from "@footon/storage";
 import { FoodDataCentralClient, dailySummary, deleteEntry, logFood, updateEntry } from "@footon/fuel";
 import { trainingPlan } from "@footon/blocks";
+import { getObservations, observationInputSchema, recordObservation, summarizeVitals, VITALS_METRICS } from "@footon/vitals";
 
 const config = loadConfig();
 if (!config.fdcApiKey) {
@@ -106,6 +107,53 @@ server.registerTool("daily_nutrition_summary", {
   description: "Summarize food records for a calendar day in the requesting iMessage sender's timezone.",
   inputSchema: z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).strict(),
 }, ({ date }, ctx) => forSender(ctx, user => dailySummary(db, user.id, user.timezone, date)));
+
+function withoutUserId<T extends { userId: string }>(value: T): Omit<T, "userId"> {
+  const output = { ...value };
+  delete (output as Partial<T>).userId;
+  return output;
+}
+
+const manualObservationInputSchema = z.object({
+  metric: z.enum(VITALS_METRICS),
+  value: z.number().finite(),
+  unit: z.enum(["kg", "bpm", "ms", "minutes", "score_0_10"]),
+  observedAt: z.string().datetime({ offset: true }).optional(),
+  note: z.string().trim().max(1000).optional(),
+}).strict().superRefine((input, context) => {
+  if (!observationInputSchema.safeParse({ ...input, source: "manual" }).success) {
+    context.addIssue({ code: "custom", message: "Metric, value, and unit must match a supported observation" });
+  }
+});
+
+const observationRangeInputSchema = z.object({
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  metric: z.enum(VITALS_METRICS).optional(),
+}).strict();
+
+server.registerTool("record_observation", {
+  description: "Record a manually reported physiological measurement or check-in for the trusted requesting iMessage sender. Supported units: kg, bpm, ms, minutes, and score_0_10.",
+  inputSchema: manualObservationInputSchema,
+}, (input, ctx) => forSender(ctx, user => {
+  const validated = observationInputSchema.parse({ ...input, source: "manual" });
+  return withoutUserId(recordObservation(db, user.id, user.timezone, validated));
+}));
+
+server.registerTool("get_observations", {
+  description: "Retrieve physiological observations for the trusted requesting iMessage sender in an inclusive local-date range.",
+  inputSchema: observationRangeInputSchema,
+}, ({ startDate, endDate, metric }, ctx) => forSender(ctx, user =>
+  getObservations(db, user.id, { startDate, endDate, ...(metric ? { metric } : {}) }).map(withoutUserId),
+));
+
+server.registerTool("get_vitals_summary", {
+  description: "Summarize physiological observations for the trusted requesting iMessage sender. Includes sample counts, means, first-to-latest changes, and insufficient-data status; it does not diagnose or calculate readiness.",
+  inputSchema: z.object({
+    startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  }).strict(),
+}, ({ startDate, endDate }, ctx) => forSender(ctx, user => summarizeVitals(db, user.id, { startDate, endDate })));
 
 const handle = serveStdio(() => server);
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

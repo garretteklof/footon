@@ -1,0 +1,35 @@
+{
+  "name": "@footon/vitals",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Physiological observations and trend summaries for Footon",
+  "type": "module",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md", "package.json"],
+  "scripts": {
+    "build": "rm -rf dist && bun build src/index.ts --outdir dist --target bun --format esm && tsc -p tsconfig.build.json && printf '{\"type\":\"commonjs\"}\\n' > dist/types/package.json",
+    "test": "bun run build && bun test",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests",
+    "check": "bun run typecheck && bun run lint && bun run test"
+  },
+  "dependencies": {
+    "@footon/storage": "workspace:*",
+    "drizzle-orm": "^0.45.4",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/bun": "^1.4.0",
+    "@types/node": "^24.0.0",
+    "eslint": "^9.39.5",
+    "typescript": "^6.0.0",
+    "typescript-eslint": "^8.70.1"
+  }
+}

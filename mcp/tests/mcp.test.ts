@@ -65,7 +65,7 @@ test("full MCP resolves only trusted senders and enforces per-user nutrition own
   try {
     const tools = (await h.rpc("tools/list", {})).tools.map((tool: any) => tool.name);
     expect((await import("node:fs")).statSync(h.configPath).mode & 0o777).toBe(0o600);
-    expect(tools.sort()).toEqual(["search_foods", "get_food_nutrients", "log_food", "update_entry", "delete_entry", "daily_nutrition_summary", "getWeeklyTrainingPlan", "getUpcomingWorkouts", "getWorkoutForDate", "refreshTrainingPlan"].sort());
+    expect(tools.sort()).toEqual(["search_foods", "get_food_nutrients", "log_food", "update_entry", "delete_entry", "daily_nutrition_summary", "getWeeklyTrainingPlan", "getUpcomingWorkouts", "getWorkoutForDate", "refreshTrainingPlan", "record_observation", "get_observations", "get_vitals_summary"].sort());
     const storage = openStorage(h.databasePath), entryId = crypto.randomUUID();
     storage.sqlite.query("INSERT INTO food_logs VALUES (?,?,?,?,?,?,?)").run(entryId, "alex", 9, "Apple", 100, "2026-10-20T15:00:00.000Z", JSON.stringify({ caloriesKcal: 100, proteinG: 5, carbohydratesG: 20, fatG: 1, fiberG: 3, sodiumMg: 0 }));
     storage.close();
@@ -97,5 +97,30 @@ test("training results are resolved and scoped to the trusted sender", async () 
     expect(value(await h.call("getWeeklyTrainingPlan", {}, "+15551234567")).workouts[0].name).toBe("Alex private plan");
     expect(value(await h.call("getWeeklyTrainingPlan", {}, "+15559876543")).workouts[0].name).toBe("Sam private plan");
     expect((await h.call("getWeeklyTrainingPlan", { userId: "alex" }, "+15559876543")).isError).toBe(true);
+  } finally { await h.close(); }
+}, 10000);
+
+test("Vitals tools record only manual observations and keep each trusted user's data separate", async () => {
+  const h = await host();
+  const value = (result: any) => JSON.parse(result.content[0].text);
+  try {
+    const recorded = await h.call("record_observation", {
+      metric: "body_weight", value: 68, unit: "kg", observedAt: "2026-10-20T15:00:00Z",
+    }, "+15551234567");
+    expect(value(recorded)).toMatchObject({ metric: "body_weight", value: 68, unit: "kg", source: "manual", localDate: "2026-10-20" });
+    expect(value(recorded)).not.toHaveProperty("userId");
+    const aliceRows = value(await h.call("get_observations", { startDate: "2026-10-20", endDate: "2026-10-20" }, "+15551234567"));
+    expect(aliceRows).toHaveLength(1);
+    expect(value(await h.call("get_observations", { startDate: "2026-10-20", endDate: "2026-10-20" }, "+15559876543"))).toEqual([]);
+    expect(value(await h.call("get_vitals_summary", { startDate: "2026-10-20", endDate: "2026-10-20" }, "+15551234567")).metrics.body_weight)
+      .toMatchObject({ sampleCount: 1, mean: 68, status: "insufficient_data" });
+    expect((await h.call("record_observation", {
+      metric: "body_weight", value: 68, unit: "lb", userId: "alex",
+    }, "+15551234567")).isError).toBe(true);
+    expect((await h.call("record_observation", {
+      metric: "body_weight", value: 68, unit: "lb",
+    }, "+15551234567")).isError).toBe(true);
+    expect((await h.call("get_observations", { startDate: "2026-10-20", endDate: "2026-10-20" })).isError).toBe(true);
+    expect((await h.call("get_vitals_summary", { startDate: "2026-10-20", endDate: "2026-10-20" }, "+155****0000")).isError).toBe(true);
   } finally { await h.close(); }
 }, 10000);

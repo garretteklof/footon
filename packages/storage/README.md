@@ -1,6 +1,6 @@
 # @footon/storage
 
-Shared SQLite and Drizzle infrastructure for Footon. Fuel and Blocks own their Drizzle schemas and persistence operations. This package owns the connection, shared identity tables, migration tools, and database path settings. Its runtime client does not import Fuel, Blocks, MCP, or Garmin. Drizzle Kit reads Fuel and Blocks schema files when it generates shared migrations.
+Footon uses shared SQLite and Drizzle infrastructure from `@footon/storage`. Fuel, Blocks, and Vitals own their domain schemas and persistence operations. Storage owns the connection, shared identity tables, migration tools, and database path settings. Its runtime client does not import Fuel, Blocks, Vitals, MCP, or Garmin. Drizzle Kit reads domain schemas when it generates shared migrations.
 
 ## Database file
 
@@ -21,7 +21,7 @@ try {
 }
 ```
 
-Applications that use Fuel or Blocks must ensure their user records exist with `upsertUsers(storage.db, users)` before writing domain rows. MCP does this from the root configuration. The domain packages do not depend on MCP.
+Applications that use Fuel, Blocks, or Vitals must ensure that user records exist with `upsertUsers(storage.db, users)` before they write domain rows. MCP does this from the root configuration. The domain packages do not depend on MCP.
 
 ## Migrations
 
@@ -33,7 +33,7 @@ Run commands from the monorepo root:
 
 Do not run the baseline command on a new or empty database. Do not run schema changes automatically when MCP starts.
 
-The initial migration matches the existing shared schema. The follow-up migration adds the Blocks refresh-ordering table without changing existing records.
+The initial migration matches the existing shared schema. Migration `0001_training-refresh-state` adds the Blocks refresh-ordering table. Migration `0002_vitals-observations` adds Vitals observations. Migration `0003_blocks-athlete-data` adds athletic profiles and completed activities. These migrations add tables and indexes. They do not alter existing tables or records.
 
 ## Data protection
 

@@ -8,6 +8,7 @@ on:
       - "packages/storage/**"
       - "packages/fuel/**"
       - "packages/blocks/**"
+      - "packages/vitals/**"
       - "mcp/**"
       - "tests/garmin-workspace.test.ts"
       - "package.json"
@@ -20,6 +21,7 @@ on:
       - "packages/storage/**"
       - "packages/fuel/**"
       - "packages/blocks/**"
+      - "packages/vitals/**"
       - "mcp/**"
       - "tests/garmin-workspace.test.ts"
       - "package.json"
@@ -46,6 +48,7 @@ jobs:
       - run: bun run --filter @footon/storage lint
       - run: bun run --filter @footon/fuel lint
       - run: bun run --filter @footon/blocks lint
+      - run: bun run --filter @footon/vitals check
       - run: bun run --filter @footon/mcp lint
       - run: bun run typecheck
       - run: bun run test
